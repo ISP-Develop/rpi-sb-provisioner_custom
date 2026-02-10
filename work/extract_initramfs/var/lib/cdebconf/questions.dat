@@ -1,0 +1,16 @@
+Name: libpam0g/restart-failed
+Template: libpam0g/restart-failed
+Owners: libpam0g
+
+Name: libpam0g/restart-services
+Template: libpam0g/restart-services
+Owners: libpam0g
+
+Name: libpam0g/xdm-needs-restart
+Template: libpam0g/xdm-needs-restart
+Owners: libpam0g
+
+Name: libraries/restart-without-asking
+Template: libraries/restart-without-asking
+Owners: libpam0g
+

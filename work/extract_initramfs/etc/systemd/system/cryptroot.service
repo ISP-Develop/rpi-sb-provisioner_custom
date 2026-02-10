@@ -1,0 +1,10 @@
+[Unit]
+Description=Unlock and pivot root into a pre-defined LUKS container
+
+[Service]
+ExecStart=/usr/bin/init_cryptroot.sh
+StandardOutput=file:/cryptroot_stdout.log
+StandardError=file:/cryptroot_stderr.log
+
+[Install]
+WantedBy=multi-user.target

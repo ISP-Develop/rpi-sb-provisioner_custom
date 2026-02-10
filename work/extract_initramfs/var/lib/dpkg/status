@@ -1,0 +1,1254 @@
+Package: base-files
+Essential: yes
+Status: install ok installed
+Priority: required
+Section: admin
+Installed-Size: 341
+Maintainer: Santiago Vila <sanvila@debian.org>
+Architecture: arm64
+Multi-Arch: foreign
+Version: 12.4+deb12u9
+Replaces: base, dpkg (<= 1.15.0), miscutils
+Provides: base
+Pre-Depends: awk
+Breaks: debian-security-support (<< 2019.04.25), initscripts (<< 2.88dsf-13.3), sendfile (<< 2.1b.20080616-5.2~)
+Conffiles:
+ /etc/debian_version c1f4b964f78872b1c48a35215f6b91ed
+ /etc/dpkg/origins/debian c47b6815f67ad1aeccb0d4529bd0b990
+ /etc/host.conf 4eb63731c9f5e30903ac4fc07a7fe3d6
+ /etc/issue 349d61a0e072d678e3e94923f0c3ce0e
+ /etc/issue.net 3ae9b9ff69a78d614864f1957778fecb
+ /etc/update-motd.d/10-uname 9e1b832b7b06f566156e7c9e0548247b
+Description: Debian base system miscellaneous files
+ This package contains the basic filesystem hierarchy of a Debian system, and
+ several important miscellaneous files, such as /etc/debian_version,
+ /etc/host.conf, /etc/issue, /etc/motd, /etc/profile, and others,
+ and the text of several common licenses in use on Debian systems.
+
+Package: base-passwd
+Essential: yes
+Status: install ok installed
+Priority: required
+Section: admin
+Installed-Size: 275
+Maintainer: Colin Watson <cjwatson@debian.org>
+Architecture: arm64
+Multi-Arch: foreign
+Version: 3.6.1
+Replaces: base
+Depends: libc6 (>= 2.34), libdebconfclient0 (>= 0.145), libselinux1 (>= 3.1~)
+Recommends: debconf (>= 0.5) | debconf-2.0
+Description: Debian base system master password and group files
+ These are the canonical master copies of the user database files
+ (/etc/passwd and /etc/group), containing the Debian-allocated user and
+ group IDs. The update-passwd tool is provided to keep the system databases
+ synchronized with these master files.
+
+Package: busybox
+Status: install ok installed
+Priority: optional
+Section: utils
+Installed-Size: 897
+Maintainer: Debian Install System Team <debian-boot@lists.debian.org>
+Architecture: arm64
+Source: busybox (1:1.35.0-4)
+Version: 1:1.35.0-4+b3
+Replaces: busybox-static
+Depends: libc6 (>= 2.34)
+Conflicts: busybox-static
+Description: Tiny utilities for small and embedded systems
+ BusyBox combines tiny versions of many common UNIX utilities into a single
+ small executable. It provides minimalist replacements for the most common
+ utilities you would usually find on your desktop system (i.e., ls, cp, mv,
+ mount, tar, etc.). The utilities in BusyBox generally have fewer options than
+ their full-featured GNU cousins; however, the options that are included
+ provide the expected functionality and behave very much like their GNU
+ counterparts.
+ .
+ This package installs the BusyBox binary but does not install
+ symlinks for any of the supported utilities. Some of the utilities
+ can be used in the system by installing the busybox-syslogd,
+ busybox-udhcpc or busybox-udhcpd packages.
+Homepage: http://www.busybox.net
+
+Package: cdebconf-text-udeb
+Status: install ok installed
+Priority: optional
+Section: debian-installer
+Installed-Size: 136
+Maintainer: Debian Install System Team <debian-boot@lists.debian.org>
+Architecture: arm64
+Source: cdebconf
+Version: 0.270
+Depends: cdebconf-udeb, libc6-udeb (>= 2.36), libreadline8-udeb
+Description: Plain text frontend for Debian Configuration Management System
+ Debconf is a configuration management system for Debian packages. It is
+ used by some packages to prompt you for information before they are
+ installed. This is a reimplementation of the original debconf version
+ in C.
+ .
+ cdebconf-text-udeb is a basic plain text frontend cdebconf package used
+ by the debian-installer.
+
+Package: cdebconf-udeb
+Status: install ok installed
+Priority: standard
+Section: debian-installer
+Installed-Size: 657
+Maintainer: Debian Install System Team <debian-boot@lists.debian.org>
+Architecture: arm64
+Source: cdebconf
+Version: 0.270
+Provides: debconf-2.0
+Depends: libc6-udeb (>= 2.36), libdebian-installer4-udeb (>= 0.124), libtextwrap1-udeb (>= 0.1)
+Description: Debian Configuration Management System (C-implementation)
+ Debconf is a configuration management system for Debian packages. It is
+ used by some packages to prompt you for information before they are
+ installed. This is a reimplementation of the original debconf version
+ in C.
+ .
+ cdebconf-udeb is a minimal cdebconf package used by the
+ debian-installer
+
+Package: cryptroot-package
+Status: install ok installed
+Priority: extra
+Section: default
+Installed-Size: 135
+Maintainer: Richard Oliver <richard.oliver@raspberrypi.com>
+Architecture: arm64
+Version: 1.1.0
+Depends: cryptsetup-bin, libgcc-s1, openssl, xxd, busybox
+Description: no description given
+
+Package: cryptsetup-bin
+Status: install ok installed
+Priority: optional
+Section: admin
+Installed-Size: 2396
+Maintainer: Debian Cryptsetup Team <pkg-cryptsetup-devel@alioth-lists.debian.net>
+Architecture: arm64
+Multi-Arch: foreign
+Source: cryptsetup
+Version: 2:2.6.1-4~deb12u2
+Depends: libblkid1 (>= 2.24.2), libc6 (>= 2.34), libcryptsetup12 (>= 2:2.6), libpopt0 (>= 1.14), libuuid1 (>= 2.16)
+Description: disk encryption support - command line tools
+ Cryptsetup provides an interface for configuring encryption on block
+ devices (such as /home or swap partitions), using the Linux kernel
+ device mapper target dm-crypt. It features integrated Linux Unified Key
+ Setup (LUKS) support.
+ .
+ This package provides the cryptsetup, integritysetup and veritysetup
+ utilities.
+Homepage: https://gitlab.com/cryptsetup/cryptsetup
+
+Package: dmsetup
+Status: install ok installed
+Priority: optional
+Section: admin
+Installed-Size: 278
+Maintainer: Debian LVM Team <team+lvm@tracker.debian.org>
+Architecture: arm64
+Multi-Arch: foreign
+Source: lvm2 (2.03.16-2)
+Version: 2:1.02.185-2
+Depends: libc6 (>= 2.34), libdevmapper1.02.1 (>= 2:1.02.181)
+Description: Linux Kernel Device Mapper userspace library
+ The Linux Kernel Device Mapper is the LVM (Linux Logical Volume Management)
+ Team's implementation of a minimalistic kernel-space driver that handles
+ volume management, while keeping knowledge of the underlying device layout
+ in user-space.  This makes it useful for not only LVM, but software raid,
+ and other drivers that create "virtual" block devices.
+ .
+ This package contains a utility for modifying device mappings.
+Homepage: https://sourceware.org/lvm2/
+
+Package: gcc-12-base
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 100
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Architecture: arm64
+Multi-Arch: same
+Source: gcc-12
+Version: 12.2.0-14
+Breaks: gnat (<< 7)
+Description: GCC, the GNU Compiler Collection (base package)
+ This package contains files common to all languages and libraries
+ contained in the GNU Compiler Collection (GCC).
+Homepage: http://gcc.gnu.org/
+
+Package: kmod
+Status: install ok installed
+Priority: important
+Section: admin
+Installed-Size: 271
+Maintainer: Marco d'Itri <md@linux.it>
+Architecture: arm64
+Multi-Arch: foreign
+Version: 30+20221128-1
+Depends: libc6 (>= 2.34), liblzma5 (>= 5.1.1alpha+20120614), libssl3 (>= 3.0.0), libzstd1 (>= 1.5.2), libkmod2 (= 30+20221128-1)
+Conffiles:
+ /etc/init.d/kmod newconffile
+Description: tools for managing Linux kernel modules
+ This package contains a set of programs for loading, inserting, and
+ removing kernel modules for Linux.
+ It replaces module-init-tools.
+
+Package: libacl1
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 101
+Maintainer: Guillem Jover <guillem@debian.org>
+Architecture: arm64
+Multi-Arch: same
+Source: acl
+Version: 2.3.1-3
+Depends: libc6 (>= 2.33)
+Description: access control list - shared library
+ This package contains the shared library containing the POSIX 1003.1e
+ draft standard 17 functions for manipulating access control lists.
+Homepage: https://savannah.nongnu.org/projects/acl/
+
+Package: libapparmor1
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 161
+Maintainer: Debian AppArmor Team <pkg-apparmor-team@lists.alioth.debian.org>
+Architecture: arm64
+Multi-Arch: same
+Source: apparmor
+Version: 3.0.8-3
+Replaces: libapparmor-perl (<< 3.0.3-3)
+Depends: libc6 (>= 2.34)
+Breaks: libapparmor-perl (<< 3.0.3-3)
+Description: changehat AppArmor library
+ libapparmor1 provides a shared library one can compile programs
+ against in order to use various AppArmor functionality,
+ such as transitioning to a different AppArmor profile or hat.
+Homepage: https://apparmor.net/
+
+Package: libargon2-1
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 88
+Maintainer: Luca Bruno <lucab@debian.org>
+Architecture: arm64
+Multi-Arch: same
+Source: argon2
+Version: 0~20171227-0.3+deb12u1
+Depends: libc6 (>= 2.34)
+Breaks: cryptsetup-initramfs (<< 2:2.6.1-2)
+Description: memory-hard hashing function - runtime library
+ Argon2 is a password-hashing function that can be used to hash passwords
+ for credential storage, key derivation, or other applications.
+ .
+ There are two main versions of Argon2: Argon2i and Argon2d.
+ Argon2i is the safest against side-channel attacks, while Argon2d provides
+ the highest resistance against GPU cracking attacks.
+ .
+ Argon2i and Argon2d are parametrized by:
+  * A time cost, which defines the amount of computation realized and
+    therefore the execution time, given in number of iterations
+  * A memory cost, which defines the memory usage, given in kibibytes
+  * A parallelism degree, which defines the number of parallel threads
+ .
+ This package includes the dynamic library against which programs are linked.
+Homepage: https://github.com/P-H-C/phc-winner-argon2
+
+Package: libaudit-common
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 22
+Maintainer: Laurent Bigonville <bigon@debian.org>
+Architecture: all
+Multi-Arch: foreign
+Source: audit
+Version: 1:3.0.9-1
+Conffiles:
+ /etc/libaudit.conf cdc703f9d27f0d980271a9e95d0f18b2
+Description: Dynamic library for security auditing - common files
+ The audit-libs package contains the dynamic libraries needed for
+ applications to use the audit framework. It is used to monitor systems for
+ security related events.
+ .
+ This package contains the libaudit.conf configuration file and the associated
+ manpage.
+Homepage: https://people.redhat.com/sgrubb/audit/
+
+Package: libaudit1
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 154
+Maintainer: Laurent Bigonville <bigon@debian.org>
+Architecture: arm64
+Multi-Arch: same
+Source: audit
+Version: 1:3.0.9-1
+Depends: libaudit-common (>= 1:3.0.9-1), libc6 (>= 2.33), libcap-ng0 (>= 0.7.9)
+Description: Dynamic library for security auditing
+ The audit-libs package contains the dynamic libraries needed for
+ applications to use the audit framework. It is used to monitor systems for
+ security related events.
+Homepage: https://people.redhat.com/sgrubb/audit/
+
+Package: libblkid1
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 438
+Maintainer: util-linux packagers <util-linux@packages.debian.org>
+Architecture: arm64
+Multi-Arch: same
+Source: util-linux
+Version: 2.38.1-5+deb12u3
+Depends: libc6 (>= 2.33)
+Description: block device ID library
+ The blkid library allows system programs such as fsck and mount to
+ quickly and easily find block devices by filesystem UUID or label.
+ This allows system administrators to avoid specifying filesystems by
+ hard-coded device names and use a logical naming system instead.
+Homepage: https://www.kernel.org/pub/linux/utils/util-linux/
+
+Package: libc6-udeb
+Status: install ok installed
+Priority: optional
+Section: debian-installer
+Installed-Size: 2792
+Maintainer: GNU Libc Maintainers <debian-glibc@lists.debian.org>
+Architecture: arm64
+Source: glibc
+Version: 2.36-9+deb12u9
+Replaces: libc6 (= 2.36-9+deb12u9)
+Provides: libc-udeb, libc6 (= 2.36-9+deb12u9), libnss-dns-udeb, libnss-files-udeb
+Conflicts: libc6 (= 2.36-9+deb12u9)
+Description: GNU C Library: Shared libraries - udeb
+ Contains the standard libraries that are used by nearly all programs on
+ the system. This package includes shared versions of the standard C library
+ and the standard math library, as well as many others.
+ .
+ This package contains a minimal set of libraries needed for the Debian
+ installer.  Do not install it on a normal system.
+
+Package: libcap-ng0
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 153
+Maintainer: Håvard F. Aasen <havard.f.aasen@pfft.no>
+Architecture: arm64
+Multi-Arch: same
+Source: libcap-ng (0.8.3-1)
+Version: 0.8.3-1+b3
+Depends: libc6 (>= 2.33)
+Description: alternate POSIX capabilities library
+ This library implements the user-space interfaces to the POSIX
+ 1003.1e capabilities available in Linux kernels.  These capabilities are
+ a partitioning of the all powerful root privilege into a set of distinct
+ privileges.
+ .
+ The libcap-ng library is intended to make programming with POSIX
+ capabilities much easier than the traditional libcap library.
+ .
+ This package contains dynamic libraries for libcap-ng.
+Homepage: https://people.redhat.com/sgrubb/libcap-ng
+
+Package: libcap2
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 157
+Maintainer: Christian Kastner <ckk@debian.org>
+Architecture: arm64
+Multi-Arch: same
+Version: 1:2.66-4
+Depends: libc6 (>= 2.34)
+Description: POSIX 1003.1e capabilities (library)
+ Libcap implements the user-space interfaces to the POSIX 1003.1e capabilities
+ available in Linux kernels. These capabilities are a partitioning of the all
+ powerful root privilege into a set of distinct privileges.
+ .
+ This package contains the shared library.
+Homepage: https://sites.google.com/site/fullycapable/
+
+Package: libcrypt1
+Protected: yes
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 225
+Maintainer: Marco d'Itri <md@linux.it>
+Architecture: arm64
+Multi-Arch: same
+Source: libxcrypt
+Version: 1:4.4.33-2
+Replaces: libc6 (<< 2.29-4)
+Depends: libc6 (>= 2.36)
+Conflicts: libpam0g (<< 1.4.0-10)
+Description: libcrypt shared library
+ libxcrypt is a modern library for one-way hashing of passwords.
+ It supports DES, MD5, NTHASH, SUNMD5, SHA-2-256, SHA-2-512, and
+ bcrypt-based password hashes
+ It provides the traditional Unix 'crypt' and 'crypt_r' interfaces,
+ as well as a set of extended interfaces like 'crypt_gensalt'.
+Important: yes
+
+Package: libcryptsetup12
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 571
+Maintainer: Debian Cryptsetup Team <pkg-cryptsetup-devel@alioth-lists.debian.net>
+Architecture: arm64
+Multi-Arch: same
+Source: cryptsetup
+Version: 2:2.6.1-4~deb12u2
+Depends: libargon2-1 (>= 0~20171227), libblkid1 (>= 2.24.2), libc6 (>= 2.34), libdevmapper1.02.1 (>= 2:1.02.97), libjson-c5 (>= 0.15), libssl3 (>= 3.0.0), libuuid1 (>= 2.16)
+Description: disk encryption support - shared library
+ Cryptsetup provides an interface for configuring encryption on block
+ devices (such as /home or swap partitions), using the Linux kernel
+ device mapper target dm-crypt. It features integrated Linux Unified Key
+ Setup (LUKS) support.
+ .
+ This package provides the libcryptsetup shared library.
+Homepage: https://gitlab.com/cryptsetup/cryptsetup
+
+Package: libdebconfclient0
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 88
+Maintainer: Debian Install System Team <debian-boot@lists.debian.org>
+Architecture: arm64
+Multi-Arch: same
+Source: cdebconf
+Version: 0.270
+Depends: libc6 (>= 2.17)
+Description: Debian Configuration Management System (C-implementation library)
+ Debconf is a configuration management system for Debian packages. It is
+ used by some packages to prompt you for information before they are
+ installed. cdebconf is a reimplementation of the original debconf in C.
+ .
+ This library allows C programs to interface with cdebconf.
+
+Package: libdebian-installer4-udeb
+Status: install ok installed
+Priority: optional
+Section: debian-installer
+Installed-Size: 72
+Maintainer: Debian Install System Team <debian-boot@lists.debian.org>
+Architecture: arm64
+Source: libdebian-installer
+Version: 0.124
+Depends: libc6-udeb (>= 2.35)
+Description: Library of common debian-installer functions
+ This library is used by debian-installer to perform common functions
+ such as logging messages and executing commands. If you aren't
+ working on debian-installer or building your own install system based
+ on debian-installer, then you probably don't need this library.
+
+Package: libdevmapper1.02.1
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 502
+Maintainer: Debian LVM Team <team+lvm@tracker.debian.org>
+Architecture: arm64
+Multi-Arch: same
+Source: lvm2 (2.03.16-2)
+Version: 2:1.02.185-2
+Depends: libc6 (>= 2.33), libselinux1 (>= 3.1~), libudev1 (>= 183), dmsetup (>= 2:1.02.185-2~)
+Description: Linux Kernel Device Mapper userspace library
+ The Linux Kernel Device Mapper is the LVM (Linux Logical Volume Management)
+ Team's implementation of a minimalistic kernel-space driver that handles
+ volume management, while keeping knowledge of the underlying device layout
+ in user-space.  This makes it useful for not only LVM, but software raid,
+ and other drivers that create "virtual" block devices.
+ .
+ This package contains the (user-space) shared library for accessing the
+ device-mapper; it allows usage of the device-mapper through a clean,
+ consistent interface (as opposed to through kernel ioctls).
+Homepage: https://sourceware.org/lvm2/
+
+Package: libfdisk1
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 585
+Maintainer: util-linux packagers <util-linux@packages.debian.org>
+Architecture: arm64
+Multi-Arch: same
+Source: util-linux
+Version: 2.38.1-5+deb12u3
+Depends: libblkid1 (>= 2.24.2), libc6 (>= 2.33), libuuid1 (>= 2.16)
+Description: fdisk partitioning library
+ The libfdisk library is used for manipulating partition tables. It is
+ the core of the fdisk, cfdisk, and sfdisk tools.
+Homepage: https://www.kernel.org/pub/linux/utils/util-linux/
+
+Package: libffi8
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 92
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Architecture: arm64
+Multi-Arch: same
+Source: libffi
+Version: 3.4.4-1
+Replaces: libffi8ubuntu1 (<< 3.4.2-1)
+Provides: libffi8ubuntu1 (= 3.4.4-1)
+Depends: libc6 (>= 2.34)
+Breaks: libffi8ubuntu1 (<< 3.4.2-1)
+Description: Foreign Function Interface library runtime
+ A foreign function interface is the popular name for the interface that
+ allows code written in one language to call code written in another
+ language.
+Homepage: https://sourceware.org/libffi/
+
+Package: libgcc-s1
+Protected: yes
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 147
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Architecture: arm64
+Multi-Arch: same
+Source: gcc-12
+Version: 12.2.0-14
+Replaces: libgcc1 (<< 1:10)
+Provides: libgcc1 (= 1:12.2.0-14)
+Depends: gcc-12-base (= 12.2.0-14), libc6 (>= 2.35)
+Breaks: libgcc-7-dev (<< 7.5.0-4), libgcc-8-dev (<< 8.3.0-27), libgcc-9-dev (<< 9.2.1-26)
+Description: GCC support library
+ Shared version of the support library, a library of internal subroutines
+ that GCC uses to overcome shortcomings of particular machines, or
+ special needs for some languages.
+Homepage: http://gcc.gnu.org/
+Important: yes
+
+Package: libgcrypt20
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 1267
+Maintainer: Debian GnuTLS Maintainers <pkg-gnutls-maint@lists.alioth.debian.org>
+Architecture: arm64
+Multi-Arch: same
+Version: 1.10.1-3
+Depends: libc6 (>= 2.34), libgpg-error0 (>= 1.27)
+Suggests: rng-tools
+Description: LGPL Crypto library - runtime library
+ libgcrypt contains cryptographic functions.  Many important free
+ ciphers, hash algorithms and public key signing algorithms have been
+ implemented:
+ .
+ Arcfour, Blowfish, CAST5, DES, AES, Twofish, Serpent, rfc2268 (rc2), SEED,
+ Poly1305, Camellia, ChaCha20, IDEA, Salsa, SM4, Blake-2, CRC, MD2, MD4, MD5,
+ RIPE-MD160, SM3, SHA-1, SHA-256, SHA-512, SHA3-224, SHA3-256, SHA3-384,
+ SHA3-512, SHAKE128, SHAKE256, Tiger, Whirlpool, DSA, DSA2, ElGamal, RSA, ECC
+ (Curve25519, sec256k1, GOST R 34.10-2001 and GOST R 34.10-2012, etc.)
+Homepage: https://directory.fsf.org/project/libgcrypt/
+
+Package: libgpg-error0
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 231
+Maintainer: Debian GnuPG Maintainers <pkg-gnupg-maint@lists.alioth.debian.org>
+Architecture: arm64
+Multi-Arch: same
+Source: libgpg-error
+Version: 1.46-1
+Depends: libc6 (>= 2.34)
+Recommends: libgpg-error-l10n
+Description: GnuPG development runtime library
+ Library that defines common error values, messages, and common
+ runtime functionality for all GnuPG components.  Among these are GPG,
+ GPGSM, GPGME, GPG-Agent, libgcrypt, pinentry, SmartCard Daemon and
+ possibly more in the future.
+ .
+ It will likely be renamed "gpgrt" in the future.
+Homepage: https://www.gnupg.org/related_software/libgpg-error/
+
+Package: libip4tc2
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 98
+Maintainer: Debian Netfilter Packaging Team <pkg-netfilter-team@lists.alioth.debian.org>
+Architecture: arm64
+Multi-Arch: same
+Source: iptables
+Version: 1.8.9-2
+Depends: libc6 (>= 2.28)
+Description: netfilter libip4tc library
+ The iptables/xtables framework has been replaced by nftables. You should
+ consider migrating now.
+ .
+ This package contains the user-space iptables (IPv4) C library from the
+ Netfilter xtables framework.
+ .
+ iptables IPv4 ruleset ADT and kernel interface.
+ .
+ This library has been considered private for years (and still is), in the
+ sense of changing symbols and backward compatibility not guaranteed.
+Homepage: https://www.netfilter.org/
+
+Package: libjson-c5
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 169
+Maintainer: Nicolas Mora <babelouest@debian.org>
+Architecture: arm64
+Multi-Arch: same
+Source: json-c
+Version: 0.16-2
+Depends: libc6 (>= 2.33)
+Description: JSON manipulation library - shared library
+ This library allows you to easily construct JSON objects in C,
+ output them as JSON formatted strings and parse JSON formatted
+ strings back into the C representation of JSON objects.
+Homepage: https://github.com/json-c/json-c/wiki
+
+Package: libkmod2
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 161
+Maintainer: Marco d'Itri <md@linux.it>
+Architecture: arm64
+Multi-Arch: same
+Source: kmod
+Version: 30+20221128-1
+Depends: libc6 (>= 2.33), liblzma5 (>= 5.1.1alpha+20120614), libssl3 (>= 3.0.0), libzstd1 (>= 1.5.2)
+Description: libkmod shared library
+ This library provides an API for insertion, removal, configuration and
+ listing of kernel modules.
+
+Package: liblz4-1
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 217
+Maintainer: Nobuhiro Iwamatsu <iwamatsu@debian.org>
+Architecture: arm64
+Multi-Arch: same
+Source: lz4
+Version: 1.9.4-1
+Replaces: liblz4-1a
+Depends: libc6 (>= 2.17)
+Breaks: liblz4-1a
+Description: Fast LZ compression algorithm library - runtime
+ LZ4 is a very fast lossless compression algorithm, providing compression speed
+ at 400 MB/s per core, scalable with multi-cores CPU. It also features an
+ extremely fast decoder, with speed in multiple GB/s per core, typically
+ reaching RAM speed limits on multi-core systems.
+ .
+ This package includes the shared library.
+Homepage: https://github.com/lz4/lz4
+
+Package: liblzma5
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 341
+Maintainer: Jonathan Nieder <jrnieder@gmail.com>
+Architecture: arm64
+Multi-Arch: same
+Source: xz-utils
+Version: 5.4.1-0.2
+Depends: libc6 (>= 2.34)
+Breaks: liblzma2 (<< 5.1.1alpha+20110809-3~)
+Description: XZ-format compression library
+ XZ is the successor to the Lempel-Ziv/Markov-chain Algorithm
+ compression format, which provides memory-hungry but powerful
+ compression (often better than bzip2) and fast, easy decompression.
+ .
+ The native format of liblzma is XZ; it also supports raw (headerless)
+ streams and the older LZMA format used by lzma. (For 7-Zip's related
+ format, use the p7zip package instead.)
+Homepage: https://tukaani.org/xz/
+
+Package: libmount1
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 510
+Maintainer: util-linux packagers <util-linux@packages.debian.org>
+Architecture: arm64
+Multi-Arch: same
+Source: util-linux
+Version: 2.38.1-5+deb12u3
+Depends: libblkid1 (>= 2.17.2), libc6 (>= 2.34), libselinux1 (>= 3.1~)
+Suggests: cryptsetup-bin
+Description: device mounting library
+ This device mounting library is used by mount and umount helpers.
+Homepage: https://www.kernel.org/pub/linux/utils/util-linux/
+
+Package: libp11-kit0
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 1496
+Maintainer: Debian GnuTLS Maintainers <pkg-gnutls-maint@lists.alioth.debian.org>
+Architecture: arm64
+Multi-Arch: same
+Source: p11-kit
+Version: 0.24.1-2
+Depends: libc6 (>= 2.34), libffi8 (>= 3.4)
+Description: library for loading and coordinating access to PKCS#11 modules - runtime
+ The p11-kit library provides a way to load and enumerate Public-Key
+ Cryptography Standard #11 modules, along with a standard configuration
+ setup for installing PKCS#11 modules so that they're discoverable. It
+ also solves problems with coordinating the use of PKCS#11 by different
+ components or libraries living in the same process.
+ .
+ This package contains the shared library required for applications loading
+ and accessing PKCS#11 modules.
+Homepage: https://p11-glue.github.io/p11-glue/p11-kit.html
+
+Package: libpam0g
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 315
+Maintainer: Sam Hartman <hartmans@debian.org>
+Architecture: arm64
+Multi-Arch: same
+Source: pam
+Version: 1.5.2-6+rpt2+deb12u1
+Replaces: libpam0g-util
+Depends: libaudit1 (>= 1:2.2.1), libc6 (>= 2.34), debconf (>= 0.5) | debconf-2.0
+Suggests: libpam-doc
+Description: Pluggable Authentication Modules library
+ Contains the shared library for Linux-PAM, a library that enables the
+ local system administrator to choose how applications authenticate users.
+ In other words, without rewriting or recompiling a PAM-aware application,
+ it is possible to switch between the authentication mechanism(s) it uses.
+ One may entirely upgrade the local authentication system without touching
+ the applications themselves.
+Homepage: http://www.linux-pam.org/
+
+Package: libpcre2-8-0
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 649
+Maintainer: Matthew Vernon <matthew@debian.org>
+Architecture: arm64
+Multi-Arch: same
+Source: pcre2
+Version: 10.42-1
+Depends: libc6 (>= 2.34)
+Description: New Perl Compatible Regular Expression Library- 8 bit runtime files
+ This is PCRE2, the new implementation of PCRE, a library of functions
+ to support regular expressions whose syntax and semantics are as
+ close as possible to those of the Perl 5 language. New projects
+ should use this library in preference to the older library,
+ confusingly called pcre3 in Debian.
+ .
+ This package contains the 8 bit runtime library, which operates on
+ ASCII and UTF-8 input.
+Homepage: https://pcre.org/
+
+Package: libpopt0
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 257
+Maintainer: Håvard F. Aasen <havard.f.aasen@pfft.no>
+Architecture: arm64
+Multi-Arch: same
+Source: popt
+Version: 1.19+dfsg-1
+Depends: libc6 (>= 2.33)
+Description: lib for parsing cmdline parameters
+ Popt was heavily influenced by the getopt() and getopt_long() functions,
+ but it allows more powerful argument expansion. It can parse arbitrary
+ argv[] style arrays and automatically set variables based on command
+ line arguments. It also allows command line arguments to be aliased via
+ configuration files and includes utility functions for parsing arbitrary
+ strings into argv[] arrays using shell-like rules.
+ .
+ This package contains the runtime library and locale data.
+Homepage: https://github.com/rpm-software-management/popt
+
+Package: libreadline8-udeb
+Status: install ok installed
+Priority: optional
+Section: debian-installer
+Installed-Size: 420
+Maintainer: Matthias Klose <doko@debian.org>
+Architecture: arm64
+Source: readline
+Version: 8.2-1.3
+Depends: readline-common-udeb, libc6-udeb (>= 2.36), libtinfo6-udeb (>= 6.3+20220423)
+Description: GNU readline and history libraries, run-time libraries (d-i)
+ The GNU readline library aids in the consistency of user interface
+ across discrete programs that need to provide a command line
+ interface.
+ .
+ The GNU history library provides a consistent user interface for
+ recalling lines of previously typed input.
+
+Package: libseccomp2
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 152
+Maintainer: Kees Cook <kees@debian.org>
+Architecture: arm64
+Multi-Arch: same
+Source: libseccomp
+Version: 2.5.4-1+deb12u1
+Depends: libc6 (>= 2.17)
+Description: high level interface to Linux seccomp filter
+ This library provides a high level interface to constructing, analyzing
+ and installing seccomp filters via a BPF passed to the Linux Kernel's
+ prctl() syscall.
+Homepage: https://github.com/seccomp/libseccomp
+
+Package: libselinux1
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 223
+Maintainer: Debian SELinux maintainers <selinux-devel@lists.alioth.debian.org>
+Architecture: arm64
+Multi-Arch: same
+Source: libselinux (3.4-1)
+Version: 3.4-1+b6
+Depends: libc6 (>= 2.34), libpcre2-8-0 (>= 10.22)
+Description: SELinux runtime shared libraries
+ This package provides the shared libraries for Security-enhanced
+ Linux that provides interfaces (e.g. library functions for the
+ SELinux kernel APIs like getcon(), other support functions like
+ getseuserbyname()) to SELinux-aware applications. Security-enhanced
+ Linux is a patch of the Linux kernel and a number of utilities with
+ enhanced security functionality designed to add mandatory access
+ controls to Linux.  The Security-enhanced Linux kernel contains new
+ architectural components originally developed to improve the security
+ of the Flask operating system. These architectural components provide
+ general support for the enforcement of many kinds of mandatory access
+ control policies, including those based on the concepts of Type
+ Enforcement, Role-based Access Control, and Multi-level Security.
+ .
+ libselinux1 provides an API for SELinux applications to get and set
+ process and file security contexts and to obtain security policy
+ decisions.  Required for any applications that use the SELinux
+ API. libselinux may use the shared libsepol to manipulate the binary
+ policy if necessary (e.g. to downgrade the policy format to an older
+ version supported by the kernel) when loading policy.
+Homepage: https://selinuxproject.org
+
+Package: libsmartcols1
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 313
+Maintainer: util-linux packagers <util-linux@packages.debian.org>
+Architecture: arm64
+Multi-Arch: same
+Source: util-linux
+Version: 2.38.1-5+deb12u3
+Depends: libc6 (>= 2.33)
+Description: smart column output alignment library
+ This smart column output alignment library is used by fdisk utilities.
+Homepage: https://www.kernel.org/pub/linux/utils/util-linux/
+
+Package: libssl3
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 6045
+Maintainer: Debian OpenSSL Team <pkg-openssl-devel@alioth-lists.debian.net>
+Architecture: arm64
+Multi-Arch: same
+Source: openssl
+Version: 3.0.15-1~deb12u1+rpt1
+Depends: libc6 (>= 2.34)
+Description: Secure Sockets Layer toolkit - shared libraries
+ This package is part of the OpenSSL project's implementation of the SSL
+ and TLS cryptographic protocols for secure communication over the
+ Internet.
+ .
+ It provides the libssl and libcrypto shared libraries.
+Homepage: https://www.openssl.org/
+
+Package: libsystemd-shared
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 5320
+Maintainer: Debian systemd Maintainers <pkg-systemd-maintainers@lists.alioth.debian.org>
+Architecture: arm64
+Multi-Arch: same
+Source: systemd
+Version: 252.33-1~deb12u1
+Depends: libacl1 (>= 2.2.23), libapparmor1 (>= 2.13), libaudit1 (>= 1:2.2.1), libblkid1 (>= 2.24), libc6 (>= 2.36), libcap2 (>= 1:2.10), libcrypt1 (>= 1:4.4.0), libgcrypt20 (>= 1.10.0), libip4tc2 (>= 1.8.3), libkmod2 (>= 15), liblz4-1 (>= 0.0~r130), liblzma5 (>= 5.1.1alpha+20120614), libmount1 (>= 2.30), libpam0g (>= 0.99.7.1), libseccomp2 (>= 2.4.1), libselinux1 (>= 3.1~), libssl3 (>= 3.0.0), libzstd1 (>= 1.5.2)
+Description: systemd shared private library
+ This internal shared library provides common code used by various systemd
+ components. It is supposed to decrease memory and disk footprint.
+ The shared library is not meant for public use and is not API or ABI stable.
+Homepage: https://www.freedesktop.org/wiki/Software/systemd
+
+Package: libsystemd0
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 922
+Maintainer: Debian systemd Maintainers <pkg-systemd-maintainers@lists.alioth.debian.org>
+Architecture: arm64
+Multi-Arch: same
+Source: systemd
+Version: 252.33-1~deb12u1
+Depends: libc6 (>= 2.34), libcap2 (>= 1:2.10), libgcrypt20 (>= 1.10.0), liblz4-1 (>= 0.0~r122), liblzma5 (>= 5.1.1alpha+20120614), libzstd1 (>= 1.5.2)
+Description: systemd utility library
+ This library provides APIs to interface with various system components such as
+ the system journal, the system service manager, D-Bus and more.
+Homepage: https://www.freedesktop.org/wiki/Software/systemd
+
+Package: libtextwrap1-udeb
+Status: install ok installed
+Priority: optional
+Section: debian-installer
+Installed-Size: 71
+Maintainer: Debian QA Group <packages@qa.debian.org>
+Architecture: arm64
+Source: libtextwrap
+Version: 0.1-16
+Depends: libc6-udeb (>= 2.36)
+Description: text-wrapping library with i18n - runtime udeb
+
+Package: libtinfo6
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 533
+Maintainer: Craig Small <csmall@debian.org>
+Architecture: arm64
+Multi-Arch: same
+Source: ncurses
+Version: 6.4-4
+Depends: libc6 (>= 2.34)
+Description: shared low-level terminfo library for terminal handling
+ The ncurses library routines are a terminal-independent method of
+ updating character screens with reasonable optimization.
+ .
+ This package contains the shared low-level terminfo library.
+Homepage: https://invisible-island.net/ncurses/
+
+Package: libtinfo6-udeb
+Status: install ok installed
+Priority: optional
+Section: debian-installer
+Installed-Size: 201
+Maintainer: Craig Small <csmall@debian.org>
+Architecture: arm64
+Source: ncurses
+Version: 6.4-4
+Depends: libc6-udeb (>= 2.36)
+Description: shared low-level terminfo library for terminal handling - udeb
+ The ncurses library routines are a terminal-independent method of
+ updating character screens with reasonable optimization.
+ .
+ This package contains the stripped-down udeb version of shared low-level
+ terminfo library.
+
+Package: libudev1
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 255
+Maintainer: Debian systemd Maintainers <pkg-systemd-maintainers@lists.alioth.debian.org>
+Architecture: arm64
+Multi-Arch: same
+Source: systemd
+Version: 252.33-1~deb12u1
+Depends: libc6 (>= 2.34)
+Description: libudev shared library
+ This library provides APIs to introspect and enumerate devices on the local
+ system.
+Homepage: https://www.freedesktop.org/wiki/Software/systemd
+
+Package: libuuid1
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 110
+Maintainer: util-linux packagers <util-linux@packages.debian.org>
+Architecture: arm64
+Multi-Arch: same
+Source: util-linux
+Version: 2.38.1-5+deb12u3
+Depends: libc6 (>= 2.25)
+Recommends: uuid-runtime
+Description: Universally Unique ID library
+ The libuuid library generates and parses 128-bit Universally Unique
+ IDs (UUIDs). A UUID is an identifier that is unique within the space
+ of all such identifiers across both space and time. It can be used for
+ multiple purposes, from tagging objects with an extremely short lifetime
+ to reliably identifying very persistent objects across a network.
+ .
+ See RFC 4122 for more information.
+Homepage: https://www.kernel.org/pub/linux/utils/util-linux/
+
+Package: libzstd1
+Status: install ok installed
+Priority: optional
+Section: libs
+Installed-Size: 681
+Maintainer: RPM packaging team <team+pkg-rpm@tracker.debian.org>
+Architecture: arm64
+Multi-Arch: same
+Source: libzstd
+Version: 1.5.4+dfsg2-5
+Depends: libc6 (>= 2.34)
+Description: fast lossless compression algorithm
+ Zstd, short for Zstandard, is a fast lossless compression algorithm, targeting
+ real-time compression scenarios at zlib-level compression ratio.
+ .
+ This package contains the shared library.
+Homepage: https://github.com/facebook/zstd
+
+Package: mawk
+Status: install ok installed
+Priority: required
+Section: interpreters
+Installed-Size: 259
+Maintainer: Boyuan Yang <byang@debian.org>
+Architecture: arm64
+Multi-Arch: foreign
+Version: 1.3.4.20200120-3.1
+Provides: awk
+Depends: libc6 (>= 2.29)
+Description: Pattern scanning and text processing language
+ Mawk is an interpreter for the AWK Programming Language. The AWK
+ language is useful for manipulation of data files, text retrieval and
+ processing, and for prototyping and experimenting with algorithms. Mawk
+ is a new awk meaning it implements the AWK language as defined in Aho,
+ Kernighan and Weinberger, The AWK Programming Language, Addison-Wesley
+ Publishing, 1988. (Hereafter referred to as the AWK book.) Mawk conforms
+ to the POSIX 1003.2 (draft 11.3) definition of the AWK language
+ which contains a few features not described in the AWK book, and mawk
+ provides a small number of extensions.
+ .
+ Mawk is smaller and much faster than gawk. It has some compile-time
+ limits such as NF = 32767 and sprintf buffer = 1020.
+Homepage: https://invisible-island.net/mawk/
+
+Package: mount
+Status: install ok installed
+Priority: required
+Section: admin
+Installed-Size: 509
+Maintainer: util-linux packagers <util-linux@packages.debian.org>
+Architecture: arm64
+Multi-Arch: foreign
+Source: util-linux
+Version: 2.38.1-5+deb12u3
+Pre-Depends: libblkid1 (>= 2.17.2), libc6 (>= 2.34), libmount1 (>= 2.38), libselinux1 (>= 3.1~), libsmartcols1 (>= 2.33)
+Suggests: nfs-common
+Description: tools for mounting and manipulating filesystems
+ This package provides the mount(8), umount(8), swapon(8),
+ swapoff(8), and losetup(8) commands.
+Homepage: https://www.kernel.org/pub/linux/utils/util-linux/
+
+Package: openssl
+Status: install ok installed
+Priority: optional
+Section: utils
+Installed-Size: 2335
+Maintainer: Debian OpenSSL Team <pkg-openssl-devel@alioth-lists.debian.net>
+Architecture: arm64
+Multi-Arch: foreign
+Version: 3.0.15-1~deb12u1+rpt1
+Depends: libc6 (>= 2.34), libssl3 (>= 3.0.9)
+Suggests: ca-certificates
+Conffiles:
+ /etc/ssl/openssl.cnf fe1993ec22f6b8a46cb9706acd8fc68f
+Description: Secure Sockets Layer toolkit - cryptographic utility
+ This package is part of the OpenSSL project's implementation of the SSL
+ and TLS cryptographic protocols for secure communication over the
+ Internet.
+ .
+ It contains the general-purpose command line binary /usr/bin/openssl,
+ useful for cryptographic operations such as:
+  * creating RSA, DH, and DSA key parameters;
+  * creating X.509 certificates, CSRs, and CRLs;
+  * calculating message digests;
+  * encrypting and decrypting with ciphers;
+  * testing SSL/TLS clients and servers;
+  * handling S/MIME signed or encrypted mail.
+Homepage: https://www.openssl.org/
+
+Package: readline-common-udeb
+Status: install ok installed
+Priority: optional
+Section: debian-installer
+Installed-Size: 7
+Maintainer: Matthias Klose <doko@debian.org>
+Architecture: all
+Source: readline
+Version: 8.2-1.3
+Description: GNU readline and history libraries, common files (d-i)
+ The GNU readline library aids in the consistency of user interface
+ across discrete programs that need to provide a command line
+ interface.
+ .
+ The GNU history library provides a consistent user interface for
+ recalling lines of previously typed input.
+
+Package: systemd
+Status: install ok installed
+Priority: important
+Section: admin
+Installed-Size: 13232
+Maintainer: Debian systemd Maintainers <pkg-systemd-maintainers@lists.alioth.debian.org>
+Architecture: arm64
+Multi-Arch: foreign
+Version: 252.33-1~deb12u1
+Provides: systemd-sysusers (= 252.33-1~deb12u1), systemd-tmpfiles (= 252.33-1~deb12u1)
+Depends: libacl1 (>= 2.2.23), libaudit1 (>= 1:2.2.1), libblkid1 (>= 2.24.2), libcryptsetup12 (>= 2:2.4), libfdisk1 (>= 2.33), libkmod2 (>= 15), libp11-kit0 (>= 0.23.18.1), libseccomp2 (>= 2.3.1), libsystemd-shared (= 252.33-1~deb12u1), libsystemd0 (= 252.33-1~deb12u1), mount
+Pre-Depends: libblkid1 (>= 2.24), libc6 (>= 2.34), libcap2 (>= 1:2.10), libgcrypt20 (>= 1.10.0), liblz4-1 (>= 0.0~r122), liblzma5 (>= 5.1.1alpha+20120614), libmount1 (>= 2.30), libselinux1 (>= 3.1~), libssl3 (>= 3.0.0), libzstd1 (>= 1.5.2)
+Recommends: default-dbus-system-bus | dbus-system-bus, systemd-timesyncd | time-daemon
+Suggests: systemd-container, systemd-homed, systemd-userdbd, systemd-boot, systemd-resolved, libfido2-1, libqrencode4, libtss2-esys-3.0.2-0, libtss2-mu0, libtss2-rc0, polkitd | policykit-1
+Breaks: less (<< 563), resolvconf (<< 1.83~), sicherboot (<< 0.1.6), udev (<< 247~)
+Conflicts: consolekit, libpam-ck-connector, systemd-shim
+Conffiles:
+ /etc/systemd/journald.conf d2187d732ab2911016a4d4017c155dbb
+ /etc/systemd/logind.conf 8276eeafa20aa65e6a5dca3bdcddafb4
+ /etc/systemd/networkd.conf f461eed370e565cbe9890dd6b2c43996
+ /etc/systemd/pstore.conf ea1d43113c41edaacb39180d60a50b08
+ /etc/systemd/sleep.conf 72e9b6cd3c3c7c2abbe19564771336d0
+ /etc/systemd/system.conf 36ace4ee4543e277db35948826aa6979
+ /etc/systemd/user.conf a908ebf52cb61e955dcf6b6662666c8d
+Description: system and service manager
+ systemd is a system and service manager for Linux. It provides aggressive
+ parallelization capabilities, uses socket and D-Bus activation for starting
+ services, offers on-demand starting of daemons, keeps track of processes using
+ Linux control groups, maintains mount and automount points and implements an
+ elaborate transactional dependency-based service control logic.
+ .
+ Installing the systemd package will not switch your init system unless you
+ boot with init=/lib/systemd/systemd or install systemd-sysv in addition.
+Homepage: https://www.freedesktop.org/wiki/Software/systemd
+
+Package: systemd-sysv
+Status: install ok installed
+Priority: important
+Section: admin
+Installed-Size: 73
+Maintainer: Debian systemd Maintainers <pkg-systemd-maintainers@lists.alioth.debian.org>
+Architecture: arm64
+Multi-Arch: foreign
+Source: systemd
+Version: 252.33-1~deb12u1
+Replaces: sysvinit-core
+Pre-Depends: systemd
+Recommends: libpam-systemd, libnss-systemd
+Conflicts: file-rc, systemd-shim, sysvinit-core
+Description: system and service manager - SysV compatibility symlinks
+ This package provides manual pages and compatibility symlinks needed for
+ systemd to replace sysvinit.
+ .
+ Installing systemd-sysv will overwrite /sbin/init with a symlink to systemd.
+Homepage: https://www.freedesktop.org/wiki/Software/systemd
+
+Package: util-linux
+Essential: yes
+Status: install ok installed
+Priority: required
+Section: utils
+Installed-Size: 7910
+Maintainer: util-linux packagers <util-linux@packages.debian.org>
+Architecture: arm64
+Multi-Arch: foreign
+Version: 2.38.1-5+deb12u3
+Replaces: hardlink
+Provides: hardlink
+Depends: util-linux-extra
+Pre-Depends: libblkid1 (>= 2.37.2), libc6 (>= 2.34), libcap-ng0 (>= 0.7.9), libcrypt1 (>= 1:4.1.0), libmount1 (>= 2.38), libpam0g (>= 0.99.7.1), libselinux1 (>= 3.1~), libsmartcols1 (>= 2.38), libsystemd0, libtinfo6 (>= 6), libudev1 (>= 183), libuuid1 (>= 2.16), zlib1g (>= 1:1.1.4)
+Recommends: sensible-utils
+Suggests: dosfstools, kbd, util-linux-locales
+Conflicts: hardlink
+Conffiles:
+ /etc/pam.d/runuser b8b44b045259525e0fae9e38fdb2aeeb
+ /etc/pam.d/runuser-l 2106ea05877e8913f34b2c77fa02be45
+ /etc/pam.d/su 60fbbe65c90d741bc0d380543cefe8af
+ /etc/pam.d/su-l 756fef5687fecc0d986e5951427b0c4f
+Description: miscellaneous system utilities
+ This package contains a number of important utilities, most of which
+ are oriented towards maintenance of your system. Some of the more
+ important utilities included in this package allow you to view kernel
+ messages, create new filesystems, view block device information,
+ interface with real time clock, etc.
+Homepage: https://www.kernel.org/pub/linux/utils/util-linux/
+
+Package: util-linux-extra
+Status: install ok installed
+Priority: standard
+Section: utils
+Installed-Size: 486
+Maintainer: util-linux packagers <util-linux@packages.debian.org>
+Architecture: arm64
+Multi-Arch: foreign
+Source: util-linux
+Version: 2.38.1-5+deb12u3
+Replaces: util-linux (<< 2.38~)
+Depends: libaudit1 (>= 1:2.2.1), libc6 (>= 2.34), libsmartcols1 (>= 2.38)
+Breaks: util-linux (<< 2.38~)
+Conffiles:
+ /etc/default/hwclock 02f94aaf57aff4e2e6751ec7b877a997
+ /etc/init.d/hwclock.sh newconffile
+Description: interactive login tools
+ Tools commonly found on systems where humans login interactively,
+ or are needed with non-standard system configurations.
+Homepage: https://www.kernel.org/pub/linux/utils/util-linux/
+
+Package: xxd
+Status: install ok installed
+Priority: optional
+Section: editors
+Installed-Size: 183
+Maintainer: Debian Vim Maintainers <team+vim@tracker.debian.org>
+Architecture: arm64
+Multi-Arch: foreign
+Source: vim
+Version: 2:9.0.1378-2
+Replaces: vim-common (<< 2:7.4.2347-1~)
+Depends: libc6 (>= 2.34)
+Breaks: vim-common (<< 2:7.4.2347-1~)
+Description: tool to make (or reverse) a hex dump
+ xxd creates a hex dump of a given file or standard input.  It can also convert
+ a hex dump back to its original binary form.
+Homepage: https://www.vim.org/
+
+Package: zlib1g
+Status: install ok installed
+Priority: required
+Section: libs
+Installed-Size: 180
+Maintainer: Mark Brown <broonie@debian.org>
+Architecture: arm64
+Multi-Arch: same
+Source: zlib
+Version: 1:1.2.13.dfsg-1+rpt1
+Provides: libz1
+Depends: libc6 (>= 2.17)
+Breaks: libxml2 (<< 2.7.6.dfsg-2), texlive-binaries (<< 2009-12)
+Conflicts: zlib1 (<= 1:1.0.4-7)
+Description: compression library - runtime
+ zlib is a library implementing the deflate compression method found
+ in gzip and PKZIP.  This package includes the shared library.
+Homepage: http://zlib.net/
+

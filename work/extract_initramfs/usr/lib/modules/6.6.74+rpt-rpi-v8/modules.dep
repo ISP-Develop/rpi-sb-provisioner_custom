@@ -1,0 +1,16 @@
+kernel/arch/arm64/crypto/aes-ce-cipher.ko.xz: kernel/lib/crypto/libaes.ko.xz
+kernel/arch/arm64/crypto/aes-ce-blk.ko.xz: kernel/arch/arm64/crypto/aes-ce-cipher.ko.xz kernel/lib/crypto/libaes.ko.xz
+kernel/arch/arm64/crypto/chacha-neon.ko.xz: kernel/lib/crypto/libchacha.ko.xz
+kernel/arch/arm64/crypto/nhpoly1305-neon.ko.xz: kernel/crypto/nhpoly1305.ko.xz kernel/lib/crypto/libpoly1305.ko.xz
+kernel/arch/arm64/crypto/aes-arm64.ko.xz: kernel/crypto/aes_generic.ko.xz kernel/lib/crypto/libaes.ko.xz
+kernel/crypto/adiantum.ko.xz: kernel/lib/crypto/libpoly1305.ko.xz
+kernel/crypto/nhpoly1305.ko.xz: kernel/lib/crypto/libpoly1305.ko.xz
+kernel/crypto/aes_generic.ko.xz: kernel/lib/crypto/libaes.ko.xz
+kernel/crypto/chacha_generic.ko.xz: kernel/lib/crypto/libchacha.ko.xz
+kernel/crypto/af_alg.ko.xz:
+kernel/crypto/algif_skcipher.ko.xz: kernel/crypto/af_alg.ko.xz
+kernel/lib/crypto/libchacha.ko.xz:
+kernel/lib/crypto/libaes.ko.xz:
+kernel/lib/crypto/libpoly1305.ko.xz:
+kernel/drivers/md/dm-mod.ko.xz:
+kernel/drivers/md/dm-crypt.ko.xz: kernel/drivers/md/dm-mod.ko.xz

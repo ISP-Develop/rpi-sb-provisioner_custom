@@ -1,0 +1,12 @@
+/etc
+/etc/systemd
+/etc/systemd/system
+/etc/systemd/system/cryptroot.service
+/etc/systemd/system/multi-user.target.wants
+/usr
+/usr/bin
+/usr/bin/cryptkey-fetch
+/usr/bin/init_cryptroot.sh
+/usr/bin/vcgencmd
+/usr/bin/vcmailbox
+/etc/systemd/system/multi-user.target.wants/cryptroot.service

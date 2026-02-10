@@ -1,0 +1,13 @@
+/.
+/lib
+/lib/aarch64-linux-gnu
+/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1
+/lib/aarch64-linux-gnu/libc.so.6
+/lib/aarch64-linux-gnu/libdl.so.2
+/lib/aarch64-linux-gnu/libm.so.6
+/lib/aarch64-linux-gnu/libnss_dns.so.2
+/lib/aarch64-linux-gnu/libnss_files.so.2
+/lib/aarch64-linux-gnu/libpthread.so.0
+/lib/aarch64-linux-gnu/libresolv.so.2
+/lib/aarch64-linux-gnu/librt.so.1
+/lib/ld-linux-aarch64.so.1

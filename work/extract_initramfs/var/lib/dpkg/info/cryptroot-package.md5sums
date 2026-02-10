@@ -1,0 +1,5 @@
+9a2780a3b44c853e7f525a21849c1ec2  ./etc/systemd/system/cryptroot.service
+f96c1f0b80fabdcc4cada2deed80f331  ./usr/bin/cryptkey-fetch
+b86b30638bc371755dc1e227745b502e  ./usr/bin/init_cryptroot.sh
+1179bed6834c74f3567a0b19dbcf6cdd  ./usr/bin/vcgencmd
+51484451b327b1aba4c7f1551925a698  ./usr/bin/vcmailbox

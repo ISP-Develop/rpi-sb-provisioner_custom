@@ -1,0 +1,9 @@
+9147ea6848e17a5a6db2cba0f1616017  etc/cdebconf.conf
+37d90dbb0614353f333f8c8cc01a4a60  usr/lib/cdebconf/db/rfc822db.so
+e0e203fcb99ca59103f81b7231c61e42  usr/lib/cdebconf/db/stack.so
+3850473bae51015f7974375f6db17a85  usr/lib/cdebconf/debconf
+dcbf65dc770df44233d20e5bf90bede9  usr/lib/cdebconf/debconf-copydb
+4320c46bdaf58b95b183097be364fa8f  usr/lib/cdebconf/debconf-dumpdb
+5b8857db20e82b0722702a922bff938c  usr/lib/cdebconf/debconf-loadtemplate
+808125d95572ea66e57f648f0ce64fe7  usr/lib/cdebconf/libdebconf.so
+75565158e5bc2052f0828d6cbe76d928  usr/share/debconf/confmodule
