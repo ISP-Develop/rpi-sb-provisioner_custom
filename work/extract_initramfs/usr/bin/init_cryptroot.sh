@@ -212,17 +212,22 @@ if [ -f "$keypath" ]; then
       recovery_log "Merging Certificates..."
       mkdir -p "$STAGING/cert"
       target_file=$(ls "$STAGING"/cert_[0-9]*.tar.gz 2>/dev/null | head -n 1)
+      LIST_FILE="/mnt/var/lib/dtebx/intermediate_target.txt"
       /usr/bin/busybox tar -C "$STAGING/cert" -xzpf "$target_file"
       for pem in "$STAGING/cert"/*.pem; do
         [ -e "$pem" ] || continue
         pem_name=$(basename "$pem")
         if [ ! -f "/mnt/var/lib/dtebx/$pem_name" ]; then
           cp "$pem" "/mnt/var/lib/dtebx/"
-          # ベース名を intermediate_target.txt に追記
-          echo "$pem_name" | sed -E 's/(_|-short).*\.pem$//' >> "/mnt/var/lib/dtebx/intermediate_target.txt"
+          # ベース名を抽出
+          base_name=$(echo "$pem_name" | sed -E 's/(_|-short).*\.pem$//')
+
+          # 既存ファイルにその文字列が含まれていない場合のみ、末尾に追記
+          if ! /usr/bin/busybox grep -qFx "$base_name" "$LIST_FILE"; then
+            echo "$base_name" >> "$LIST_FILE"
+          fi
         fi
       done
-      sort -u "/mnt/var/lib/dtebx/intermediate_target.txt" -o "/mnt/var/lib/dtebx/intermediate_target.txt"
 
       # 各領域の展開 (既存の /mnt 配下へ)
       # root FS (rsyncで既存を掃除しつつ復元)
