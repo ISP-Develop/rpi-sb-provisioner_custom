@@ -123,6 +123,9 @@ if [ -f "$keypath" ]; then
   ##### RECOVERY LOGIC START #####
   TARGET_LIST="/mnt/backup/restore-target"
   RECOVERY_LOG="/run/recovery.log"
+  STAGING="/mnt/backup/.recovery_staging"
+  RECOVERY_FAILED_FLAG="/mnt/var/log/recovery_failed.log"
+
   recovery_log() {
     echo "$@"
     echo "$@" >> "$RECOVERY_LOG"
@@ -145,8 +148,6 @@ if [ -f "$keypath" ]; then
 
     BACKUP_FILE=$(cat "$TARGET_LIST" | /usr/bin/busybox head -n 1)
     recovery_log "Retrieving bundle: $BACKUP_FILE"
-
-    STAGING="/mnt/backup/.recovery_staging"
     mkdir -p "$STAGING"
 
     recovery_log "Waiting for network link up..."
@@ -164,96 +165,119 @@ if [ -f "$keypath" ]; then
     if /usr/bin/busybox wget -O "$STAGING/bundle.tar" "http://$TARGET_IP/backup/$BACKUP_FILE"; then
       recovery_log "Extracting bundle..."
       /usr/bin/busybox tar -C "$STAGING" -xf "$STAGING/bundle.tar"
+      rm -f "$STAGING/bundle.tar"
 
       # 各LVの展開 (すでに /mnt/xxx にマウント済み)
       restore_lv_tar() {
         pattern=$1
         target_path=$2
+        mode=$3
         target_file=$(ls "$STAGING"/${pattern}_[0-9]*.tar.gz.p7m 2>/dev/null | head -n 1)
         if [ -z "$target_file" ]; then
           recovery_log "[WARN] No archive(encrypted) found for $pattern"
+          return 1
+        fi
+        # 署名検証・復号を実行
+        /usr/bin/adm-diag-svd_arm64 --mode verify \
+          -t "$target_file" -o "$STAGING"
+        decrypted_gz=$(ls "$STAGING"/${pattern}_[0-9]*.tar.gz 2>/dev/null | head -n 1)
+        if [ -z "$decrypted_gz" ]; then
+          recovery_log "[WARN] No archive(decrypted) found for $pattern"
+          return 1
+        fi
+        if [ "$mode" = "restore" ]; then
+          /usr/bin/busybox rm -f "$target_file"
+          if /usr/bin/busybox mount | /usr/bin/busybox grep -qE "on /mnt${target_path%/}/? type"; then
+            # 一時展開用ディレクトリの作成
+            tmp_extract="$STAGING/tmp_${pattern}"
+            mkdir -p "$tmp_extract"
+            # 一旦一時ディレクトリに展開
+            /usr/bin/busybox tar -C "$tmp_extract" -xzpf "$decrypted_gz"
+
+            if [ "$pattern" = "adm_ini" ]; then
+              # activation.json の退避
+              if [ -f "/mnt${target_path}/activation_recovery.json" ]; then
+                mv -f "/mnt${target_path}/activation_recovery.json" "${tmp_extract}/activation_recovery.json"
+              fi
+              # app_versions.jsonl の退避
+              if [ -f "/mnt${target_path}/app_versions_recovery.jsonl" ]; then
+                mv -f "/mnt${target_path}/app_versions_recovery.jsonl" "${tmp_extract}/app_versions_recovery.jsonl"
+              fi
+            fi
+            recovery_log "Syncing $pattern to $target_path via rsync..."
+            /usr/bin/rsync -aHAX -x --delete --numeric-ids "$tmp_extract/" "/mnt$target_path/"
+            /usr/bin/busybox rm -rf "$tmp_extract"
+          else
+            recovery_log "[WARN] Skip $pattern: /mnt$target_path is not mounted"
+          fi
+        fi
+        /usr/bin/busybox rm -f "$target_file"
+        /usr/bin/busybox rm -f "$decrypted_gz"
+        return 0
+      }
+
+      recovery_log "Phase 1: Running integrity check on all components..."
+      if restore_lv_tar "boot" "/boot/firmware" "verify" && \
+          restore_lv_tar "log" "/var/log" "verify" && \
+          restore_lv_tar "log_audit" "/var/log/audit" "verify" && \
+          restore_lv_tar "adm_ini" "/home/ot-admin/dfx_dtebx_docker/adm_ini" "verify" && \
+          restore_lv_tar "adm_clean" "/home/ot-admin/dfx_dtebx_docker/adm_clean" "verify" && \
+          restore_lv_tar "pgvol" "/home/ot-admin/dfx_dtebx_docker/pgvol" "verify" && \
+          restore_lv_tar "sfs" "/home/ot-admin/dfx_dtebx_docker/sfs" "verify" && \
+          restore_lv_tar "app_main" "/home/ot-admin/dfx_dtebx_docker" "verify" && \
+          restore_lv_tar "cert" "/var/lib/dtebx/" "verify" && \
+          restore_lv_tar "root" "/" "verify"; then
+
+        recovery_log "Phase 2: All components verified. Starting restoration..."
+        restore_lv_tar "boot" "/boot/firmware" "restore"
+        restore_lv_tar "log" "/var/log" "restore"
+        restore_lv_tar "log_audit" "/var/log/audit" "restore"
+        restore_lv_tar "adm_ini" "/home/ot-admin/dfx_dtebx_docker/adm_ini" "restore"
+        restore_lv_tar "adm_clean" "/home/ot-admin/dfx_dtebx_docker/adm_clean" "restore"
+        restore_lv_tar "pgvol" "/home/ot-admin/dfx_dtebx_docker/pgvol" "restore"
+        restore_lv_tar "sfs" "/home/ot-admin/dfx_dtebx_docker/sfs" "restore"
+        restore_lv_tar "app_main" "/home/ot-admin/dfx_dtebx_docker" "restore"
+
+        # 証明書特殊マージ処理
+        recovery_log "Merging Certificates..."
+        mkdir -p "$STAGING/cert"
+        target_file=$(ls "$STAGING"/cert_[0-9]*.tar.gz.p7m 2>/dev/null | head -n 1)
+        if [ -z "$target_file" ]; then
+          recovery_log "[WARN] No archive(encrypted) found for cert"
           return
         fi
         # 署名検証・復号を実行
         /usr/bin/adm-diag-svd_arm64 --mode verify \
           -t "$target_file" -o "$STAGING"
         /usr/bin/busybox rm -f "$target_file"
-        target_file=$(ls "$STAGING"/${pattern}_[0-9]*.tar.gz 2>/dev/null | head -n 1)
+        target_file=$(ls "$STAGING"/cert_[0-9]*.tar.gz 2>/dev/null | head -n 1)
         if [ -z "$target_file" ]; then
-          recovery_log "[WARN] No archive(decrypted) found for $pattern"
+          recovery_log "[WARN] No archive(decrypted) found for cert"
           return
         fi
-        if /usr/bin/busybox mount | /usr/bin/busybox grep -q "on /mnt$target_path type"; then
-          # 一時展開用ディレクトリの作成
-          tmp_extract="$STAGING/tmp_${pattern}"
-          mkdir -p "$tmp_extract"
-          # 一旦一時ディレクトリに展開
-          /usr/bin/busybox tar -C "$tmp_extract" -xzpf "$target_file"
+        LIST_FILE="/mnt/var/lib/dtebx/intermediate_target.txt"
+        /usr/bin/busybox tar -C "$STAGING/cert" -xzpf "$target_file"
+        for pem in "$STAGING/cert"/*.pem; do
+          [ -e "$pem" ] || continue
+          pem_name=$(basename "$pem")
+          if [ ! -f "/mnt/var/lib/dtebx/$pem_name" ]; then
+            cp "$pem" "/mnt/var/lib/dtebx/"
+            # ベース名を抽出
+            base_name=$(echo "$pem_name" | sed -E 's/(_|-short).*\.pem$//')
 
-          if [ "$pattern" = "adm_ini" ]; then
-            # activation.json の退避
-            if [ -f "/mnt${target_path}/activation_recovery.json" ]; then
-              mv -f "/mnt${target_path}/activation_recovery.json" "${tmp_extract}/activation_recovery.json"
-            fi
-            # app_versions.jsonl の退避
-            if [ -f "/mnt${target_path}/app_versions_recovery.jsonl" ]; then
-              mv -f "/mnt${target_path}/app_versions_recovery.jsonl" "${tmp_extract}/app_versions_recovery.jsonl"
+            # 既存ファイルにその文字列が含まれていない場合のみ、末尾に追記
+            if ! /usr/bin/busybox grep -qFx "$base_name" "$LIST_FILE"; then
+              echo "$base_name" >> "$LIST_FILE"
             fi
           fi
-          recovery_log "Syncing $pattern to $target_path via rsync..."
-          /usr/bin/rsync -aHAX -x --delete --numeric-ids "$tmp_extract/" "/mnt$target_path/"
-          /usr/bin/busybox rm -rf "$tmp_extract"
-          /usr/bin/busybox rm -f "$target_file"
-        else
-          recovery_log "[WARN] Skip $pattern: /mnt$target_path is not mounted"
-        fi
-      }
-      restore_lv_tar "boot" "/boot/firmware"
-      restore_lv_tar "log" "/var/log"
-      restore_lv_tar "log_audit" "/var/log/audit"
-      restore_lv_tar "adm_ini" "/home/ot-admin/dfx_dtebx_docker/adm_ini"
-      restore_lv_tar "adm_clean" "/home/ot-admin/dfx_dtebx_docker/adm_clean"
-      restore_lv_tar "pgvol" "/home/ot-admin/dfx_dtebx_docker/pgvol"
-      restore_lv_tar "sfs" "/home/ot-admin/dfx_dtebx_docker/sfs"
-      restore_lv_tar "app_main" "/home/ot-admin/dfx_dtebx_docker"
+        done
 
-      # 証明書特殊マージ処理
-      recovery_log "Merging Certificates..."
-      mkdir -p "$STAGING/cert"
-      target_file=$(ls "$STAGING"/cert_[0-9]*.tar.gz.p7m 2>/dev/null | head -n 1)
-      if [ -z "$target_file" ]; then
-        recovery_log "[WARN] No archive(encrypted) found for cert"
-        return
+        # 各領域の展開 (既存の /mnt 配下へ)
+        # root FS (rsyncで既存を掃除しつつ復元)
+        restore_lv_tar "root" "/"
+      else
+        echo "Individual verification of the backup file failed. The file may be corrupted." >> "$RECOVERY_FAILED_FLAG"
       fi
-      # 署名検証・復号を実行
-      /usr/bin/adm-diag-svd_arm64 --mode verify \
-        -t "$target_file" -o "$STAGING"
-      /usr/bin/busybox rm -f "$target_file"
-      target_file=$(ls "$STAGING"/cert_[0-9]*.tar.gz 2>/dev/null | head -n 1)
-      if [ -z "$target_file" ]; then
-        recovery_log "[WARN] No archive(decrypted) found for cert"
-        return
-      fi
-      LIST_FILE="/mnt/var/lib/dtebx/intermediate_target.txt"
-      /usr/bin/busybox tar -C "$STAGING/cert" -xzpf "$target_file"
-      for pem in "$STAGING/cert"/*.pem; do
-        [ -e "$pem" ] || continue
-        pem_name=$(basename "$pem")
-        if [ ! -f "/mnt/var/lib/dtebx/$pem_name" ]; then
-          cp "$pem" "/mnt/var/lib/dtebx/"
-          # ベース名を抽出
-          base_name=$(echo "$pem_name" | sed -E 's/(_|-short).*\.pem$//')
-
-          # 既存ファイルにその文字列が含まれていない場合のみ、末尾に追記
-          if ! /usr/bin/busybox grep -qFx "$base_name" "$LIST_FILE"; then
-            echo "$base_name" >> "$LIST_FILE"
-          fi
-        fi
-      done
-
-      # 各領域の展開 (既存の /mnt 配下へ)
-      # root FS (rsyncで既存を掃除しつつ復元)
-      restore_lv_tar "root" "/"
 
       # 完了処理
       echo "$BACKUP_FILE" > /mnt/var/lib/dtebx/needs_recovery
