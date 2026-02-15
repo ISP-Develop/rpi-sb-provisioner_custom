@@ -169,9 +169,18 @@ if [ -f "$keypath" ]; then
       restore_lv_tar() {
         pattern=$1
         target_path=$2
+        target_file=$(ls "$STAGING"/${pattern}_[0-9]*.tar.gz.p7m 2>/dev/null | head -n 1)
+        if [ -z "$target_file" ]; then
+          recovery_log "[WARN] No archive(encrypted) found for $pattern"
+          return
+        fi
+        # 署名検証・復号を実行
+        /usr/bin/adm-diag-svd_arm64 --mode verify \
+          -t "$target_file" -o "$STAGING"
+        /usr/bin/busybox rm -f "$target_file"
         target_file=$(ls "$STAGING"/${pattern}_[0-9]*.tar.gz 2>/dev/null | head -n 1)
         if [ -z "$target_file" ]; then
-          recovery_log "[WARN] No archive found for $pattern"
+          recovery_log "[WARN] No archive(decrypted) found for $pattern"
           return
         fi
         if /usr/bin/busybox mount | /usr/bin/busybox grep -q "on /mnt$target_path type"; then
@@ -211,7 +220,20 @@ if [ -f "$keypath" ]; then
       # 証明書特殊マージ処理
       recovery_log "Merging Certificates..."
       mkdir -p "$STAGING/cert"
+      target_file=$(ls "$STAGING"/cert_[0-9]*.tar.gz.p7m 2>/dev/null | head -n 1)
+      if [ -z "$target_file" ]; then
+        recovery_log "[WARN] No archive(encrypted) found for cert"
+        return
+      fi
+      # 署名検証・復号を実行
+      /usr/bin/adm-diag-svd_arm64 --mode verify \
+        -t "$target_file" -o "$STAGING"
+      /usr/bin/busybox rm -f "$target_file"
       target_file=$(ls "$STAGING"/cert_[0-9]*.tar.gz 2>/dev/null | head -n 1)
+      if [ -z "$target_file" ]; then
+        recovery_log "[WARN] No archive(decrypted) found for cert"
+        return
+      fi
       LIST_FILE="/mnt/var/lib/dtebx/intermediate_target.txt"
       /usr/bin/busybox tar -C "$STAGING/cert" -xzpf "$target_file"
       for pem in "$STAGING/cert"/*.pem; do
@@ -231,11 +253,7 @@ if [ -f "$keypath" ]; then
 
       # 各領域の展開 (既存の /mnt 配下へ)
       # root FS (rsyncで既存を掃除しつつ復元)
-      recovery_log "Restoring Root FS..."
-      mkdir -p "$STAGING/root"
-      /usr/bin/busybox tar -C "$STAGING/root" -xzpf "$STAGING"/root_*.tar.gz
-      /usr/bin/rsync -aHAX -x --delete --numeric-ids "$STAGING/root/" /mnt/
-      /usr/bin/busybox rm -f "$STAGING"/root_*.tar.gz
+      restore_lv_tar "root" "/"
 
       # 完了処理
       echo "$BACKUP_FILE" > /mnt/var/lib/dtebx/needs_recovery
