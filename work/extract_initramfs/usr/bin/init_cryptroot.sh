@@ -90,6 +90,10 @@ if [ -f "$keypath" ]; then
   echo "Forcing node creation..."
   /sbin/lvm vgmknodes vg_data
 
+  # Btrfsモジュールのロード
+  echo "Loading Btrfs module..."
+  /bin/modprobe btrfs || echo "WARN: Failed to load btrfs module (might be built-in)"
+
   # デバイスノードの確認（/dev/mapper/ 経由もチェック）
   RETRY=0
   while [ ! -e "/dev/vg_data/lv_log" ] && [ ! -e "/dev/mapper/vg_data-lv_log" ] && [ $RETRY -lt 5 ]; do
@@ -102,19 +106,25 @@ if [ -f "$keypath" ]; then
   mount_lv() {
     lv_name=$1
     mount_point=$2
+    fstype=${3:-ext4}
+    mnt_opts=${4:-""}
     dev_path="/dev/mapper/vg_data-lv_${lv_name}"
     if [ -e "$dev_path" ]; then
-      echo "Mounting ${lv_name} to ${mount_point}..."
+      echo "Mounting ${lv_name} to ${mount_point} (Type: ${fstype})..."
       mkdir -p "/mnt${mount_point}"
-      /usr/bin/busybox mount -t ext4 "$dev_path" "/mnt${mount_point}"
+      if [ -n "$mnt_opts" ]; then
+        /usr/bin/busybox mount -t "$fstype" -o "$mnt_opts" "$dev_path" "/mnt${mount_point}"
+      else
+        /usr/bin/busybox mount -t "$fstype" "$dev_path" "/mnt${mount_point}"
+      fi
     fi
   }
   # 独立したパス
   mount_lv "backup" "/backup"
   mount_lv "docker" "/var/lib/docker"
   mount_lv "cert" "/var/lib/dtebx"
-  mount_lv "log"    "/var/log"
-  mount_lv "audit"  "/var/log/audit"
+  mount_lv "log"    "/var/log"       "btrfs" "compress=zstd:6"
+  mount_lv "audit"  "/var/log/audit" "btrfs" "compress=zstd:6"
 
   # アプリケーション用 (階層構造)
   # 親ディレクトリを先にマウント
@@ -211,7 +221,7 @@ if [ -f "$keypath" ]; then
               tmp_extract="$STAGING/tmp_${pattern}"
               mkdir -p "$tmp_extract"
               # 一旦一時ディレクトリに展開
-              /usr/bin/busybox tar -C "$tmp_extract" -xzpf "$decrypted_gz"
+              /usr/bin/busybox tar -xzpf "$decrypted_gz" -C "$tmp_extract"
 
               if [ "$pattern" = "adm_ini" ]; then
                 # activation.json の退避
