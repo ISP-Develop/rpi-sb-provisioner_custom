@@ -15,7 +15,7 @@ set -x                    # 実行コマンドを逐一表示
 
 ##### custom start
 PART_SIZE=$(cat /sys/class/block/mmcblk0p2/size)
-TARGET_GIB=4
+TARGET_GIB=6
 # セクタ数の計算 (1GiB = 1024^3 / 512 = 2097152 sectors)
 # 20GiB の場合: 20 * 2097152 = 41943040
 TARGET_P2_SIZE=$((TARGET_GIB * 2097152))
@@ -133,6 +133,7 @@ if [ -f "$keypath" ]; then
   mount_lv "adm_ini"    "/home/ot-admin/dfx_dtebx_docker/adm_ini"
   mount_lv "adm_clean"  "/home/ot-admin/dfx_dtebx_docker/adm_clean"
   mount_lv "dbvol"      "/home/ot-admin/dfx_dtebx_docker/pgvol"
+  mount_lv "media"      "/home/ot-admin/dfx_dtebx_docker/media"
   mount_lv "sfs"        "/home/ot-admin/dfx_dtebx_docker/sfs"
 
   /bin/udevadm settle
@@ -260,6 +261,7 @@ if [ -f "$keypath" ]; then
             restore_lv_tar "adm_ini" "/home/ot-admin/dfx_dtebx_docker/adm_ini" "verify" && \
             restore_lv_tar "adm_clean" "/home/ot-admin/dfx_dtebx_docker/adm_clean" "verify" && \
             restore_lv_tar "pgvol" "/home/ot-admin/dfx_dtebx_docker/pgvol" "verify" && \
+            restore_lv_tar "media" "/home/ot-admin/dfx_dtebx_docker/media" "verify" && \
             restore_lv_tar "sfs" "/home/ot-admin/dfx_dtebx_docker/sfs" "verify" && \
             restore_lv_tar "app_main" "/home/ot-admin/dfx_dtebx_docker" "verify" && \
             restore_lv_tar "cert" "/var/lib/dtebx/" "verify" && \
@@ -272,6 +274,7 @@ if [ -f "$keypath" ]; then
           restore_lv_tar "adm_ini" "/home/ot-admin/dfx_dtebx_docker/adm_ini" "restore"
           restore_lv_tar "adm_clean" "/home/ot-admin/dfx_dtebx_docker/adm_clean" "restore"
           restore_lv_tar "pgvol" "/home/ot-admin/dfx_dtebx_docker/pgvol" "restore"
+          restore_lv_tar "media" "/home/ot-admin/dfx_dtebx_docker/media" "restore"
           restore_lv_tar "sfs" "/home/ot-admin/dfx_dtebx_docker/sfs" "restore"
           restore_lv_tar "app_main" "/home/ot-admin/dfx_dtebx_docker" "restore"
 
