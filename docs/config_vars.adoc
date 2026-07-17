@@ -152,6 +152,16 @@ WARNING: If you are not using the WebUI, you must create this file before execut
 $ touch ${RPI_SB_PROVISIONER_MANUFACTURING_DB}
 ----
 
+=== RPI_SB_PROVISIONER_FASTBOOT_TRANSPORT
+*Optional*
+
+Controls the transport used for the fastboot connection to the target device during provisioning.
+
+* `usb` (default) - Pin the fastboot connection to the device's USB serial for the entire provisioning run. The provisioner does not query the device for its IP addresses and does not probe TCP reachability.
+* `auto` - Prefer an Ethernet (TCP) connection when the device is reachable over the network, falling back to USB otherwise. This accelerates image transfer, but selects the target purely by IP address.
+
+NOTE: When provisioning multiple devices on the same network, use `usb`. Fastboot over TCP binds to an IP address with no association to the device serial, so with several targets on one network the connection can be routed to an unintended device, making target selection unstable. `auto` is only recommended when provisioning a single device at a time and accelerated image transfer over Ethernet is desired.
+
 === RPI_DEVICE_RETRIEVE_KEYPAIR
 *Optional*
 

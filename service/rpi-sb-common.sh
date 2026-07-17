@@ -140,25 +140,38 @@ setup_fastboot_and_id_vars() {
     timeout_fatal fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar version
     TARGET_DEVICE_SERIAL="$(get_variable serialno)"
 
-    announce_start "Testing Fastboot IP connectivity"
-    USE_IPV4=
-    USE_IPV6=
-    set +e
-    IPV6_ADDRESS="$(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar ipv6-address 2>&1 | awk '/^ipv6-address:/ {print $2}')"
-    (timeout_nonfatal fastboot -s tcp:"${IPV6_ADDRESS}" getvar version)
-    USE_IPV6=$?
-    IPV4_ADDRESS="$(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar ipv4-address 2>&1 | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}')"
-    (timeout_nonfatal fastboot -s tcp:"${IPV4_ADDRESS}" getvar version)
-    USE_IPV4=$?
-    set -e
+    # Select the fastboot transport. Default is "usb", which pins the connection
+    # to the USB serial and never probes/uses TCP. This avoids unstable target
+    # selection when multiple devices share a network (fastboot over TCP binds by
+    # IP address only, with no association to the device serial). Set
+    # RPI_SB_PROVISIONER_FASTBOOT_TRANSPORT=auto to restore the previous behaviour
+    # of preferring an Ethernet (TCP) connection for accelerated image transfer.
+    if [ "${RPI_SB_PROVISIONER_FASTBOOT_TRANSPORT:-usb}" = "auto" ]; then
+        announce_start "Testing Fastboot IP connectivity"
+        USE_IPV4=
+        USE_IPV6=
+        set +e
+        IPV6_ADDRESS="$(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar ipv6-address 2>&1 | awk '/^ipv6-address:/ {print $2}')"
+        (timeout_nonfatal fastboot -s tcp:"${IPV6_ADDRESS}" getvar version)
+        USE_IPV6=$?
+        IPV4_ADDRESS="$(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar ipv4-address 2>&1 | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}')"
+        (timeout_nonfatal fastboot -s tcp:"${IPV4_ADDRESS}" getvar version)
+        USE_IPV4=$?
+        set -e
 
-    # Favour using IPv6 if available, and ethernet regardless to get 1024-byte chunks in Fastboot without USB3
-    if [ "${USE_IPV6}" -eq 0 ]; then
-    FASTBOOT_DEVICE_SPECIFIER="tcp:${IPV6_ADDRESS}"
-    elif [ "${USE_IPV4}" -eq 0 ]; then
-    FASTBOOT_DEVICE_SPECIFIER="tcp:${IPV4_ADDRESS}"
+        # Favour using IPv6 if available, and ethernet regardless to get 1024-byte chunks in Fastboot without USB3
+        if [ "${USE_IPV6}" -eq 0 ]; then
+        FASTBOOT_DEVICE_SPECIFIER="tcp:${IPV6_ADDRESS}"
+        elif [ "${USE_IPV4}" -eq 0 ]; then
+        FASTBOOT_DEVICE_SPECIFIER="tcp:${IPV4_ADDRESS}"
+        else
+        FASTBOOT_DEVICE_SPECIFIER="${TARGET_DEVICE_SERIAL}"
+        fi
     else
-    FASTBOOT_DEVICE_SPECIFIER="${TARGET_DEVICE_SERIAL}"
+        # usb (default): pin to the USB serial; do not query the device for IP
+        # addresses or probe TCP reachability.
+        log "Fastboot transport forced to USB for device ${TARGET_DEVICE_SERIAL}"
+        FASTBOOT_DEVICE_SPECIFIER="${TARGET_DEVICE_SERIAL}"
     fi
 
     # Set TARGET_USB_PATH based on TARGET_DEVICE_SERIAL
