@@ -7,7 +7,17 @@
 
 build
 *.egg-info
-debian/rpi-sb-provisioner.1
-debian/*.debhelper.log
 obj-*-gnu/
 .vscode/
+.idea/
+
+# リパック成果物（§2）とその退避
+work/cryptroot_initramfs.new*
+work/extract_initramfs_bak/
+
+# §3.2 のパッチが prov 側で作り直すため管理しない
+work/extract_initramfs/usr/lib/modules/
+
+# 展開時の副産物
+work/extract_initramfs/etc/shadow
+work/extract_initramfs/etc/gshadow
