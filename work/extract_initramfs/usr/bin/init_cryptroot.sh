@@ -158,6 +158,19 @@ if [ -f "$keypath" ]; then
     echo "$msg"
     echo "$msg" >> "$RECOVERY_FAILED_FLAG"
   }
+  # 消去の実行結果を残す独立ゾーン。/var/log は消去(復元)対象なので、そこに書くと
+  # 「消えた記録」しか残らない。lv_backup 配下のこのディレクトリだけは消去の対象外とし、
+  # 消去のたびに 1 行追記する(結果の追跡可能性)。
+  # ⚠ 利用者名・内部識別子は書かない(取り残された装置は攻撃者の手元に渡りうる)。
+  #    書くのは「いつ・どうなったか」だけ。バンドル名も内部識別子なので入れない。
+  ERASE_ZONE="/mnt/backup/eraselog"
+  ERASE_LOG="$ERASE_ZONE/erase-history.log"
+  ERASE_STATE="$ERASE_ZONE/.last-result"
+  erase_record() {
+    /usr/bin/busybox mkdir -p "$ERASE_ZONE"
+    echo "$(/usr/bin/busybox date -u '+%Y-%m-%dT%H:%M:%SZ') result=$1" >> "$ERASE_LOG"
+    echo "$1" > "$ERASE_STATE"
+  }
   (
     set -e
     if [ -f "$TARGET_LIST" ]; then
@@ -264,10 +277,14 @@ if [ -f "$keypath" ]; then
             restore_lv_tar "media" "/home/ot-admin/dfx_dtebx_docker/media" "verify" && \
             restore_lv_tar "sfs" "/home/ot-admin/dfx_dtebx_docker/sfs" "verify" && \
             restore_lv_tar "app_main" "/home/ot-admin/dfx_dtebx_docker" "verify" && \
+            restore_lv_tar "cert_all" "/var/lib/dtebx" "verify" && \
             restore_lv_tar "cert" "/var/lib/dtebx/" "verify" && \
             restore_lv_tar "root" "/" "verify"; then
 
           recovery_log "Phase 2: All components verified. Starting restoration..."
+          # ここから先で落ちると「一部だけ書き換わった」状態になる。外側のハンドラが
+          # この値を見て partial として報告する(NIST SP 800-88r2 §3.2.5 の 9)。
+          erase_record "in-progress"
           restore_lv_tar "boot" "/boot/firmware" "restore"
           restore_lv_tar "log" "/var/log" "restore"
           restore_lv_tar "log_audit" "/var/log/audit" "restore"
@@ -277,6 +294,16 @@ if [ -f "$keypath" ]; then
           restore_lv_tar "media" "/home/ot-admin/dfx_dtebx_docker/media" "restore"
           restore_lv_tar "sfs" "/home/ot-admin/dfx_dtebx_docker/sfs" "restore"
           restore_lv_tar "app_main" "/home/ot-admin/dfx_dtebx_docker" "restore"
+
+          # lv_cert(/var/lib/dtebx) を工場スナップショットへ揃える。
+          # ここを復元しないと、root の rsync が --exclude='/var/lib/dtebx/*' で除外している分、
+          # 前所有者が運用中に発行した端末証明書(issuedCrt/<端末名>/*.crt.pem)と step-ca の
+          # 発行台帳(step-db/step-db-sca)が消去後も残る。装置 identity(機体鍵・中間 CA・
+          # ConfigKEK 等)は工場スナップショット側に含まれているので、--delete で揃えても失われない。
+          # ※必ず「証明書特殊マージ処理」より前に置く。逆順にすると、マージで足した対向の
+          #   中間 CA 公開証明書を --delete が消してしまう。
+          recovery_log "Restoring lv_cert to factory baseline..."
+          restore_lv_tar "cert_all" "/var/lib/dtebx" "restore"
 
           # 証明書特殊マージ処理
           recovery_log "Merging Certificates..."
@@ -307,27 +334,74 @@ if [ -f "$keypath" ]; then
           # 各領域の展開 (既存の /mnt 配下へ)
           # root FS (rsyncで既存を掃除しつつ復元)
           restore_lv_tar "root" "/" "restore"
+
+          # lv_backup(/backup) のユーザ資産を消す。
+          # lv_backup は /mnt 配下ではあるがどの復元対象にも含まれないため、何もしないと
+          # 前所有者のバックアップ本体(buc/user の .tar.enc)・更新ジョブの記録・移行前の
+          # 設定が消去後も丸ごと残る。保持するのは装置の再利用に要るものだけ:
+          #   backup/       … 対向機の工場スナップショット(相手の消去に必要)
+          #   recoveryBoot/ … リカバリ起動資材
+          #   vault/{app,system,catalog.jsonl} … 工場出荷版の資材(ロールバック先)
+          #   eraselog/     … 本消去の記録(独立ゾーン)
+          # ⚠ ディレクトリ自体は残して中身だけ消す(消えると各アプリの書き込み先が無くなる)。
+          recovery_log "Erasing user assets on lv_backup..."
+          for user_area in "/mnt/backup/buc" "/mnt/backup/download" "/mnt/backup/vault/premigration"; do
+            if [ -d "$user_area" ]; then
+              # ディレクトリ自体は残す。ドットファイル(.backup_status 等)も対象に含める。
+              /usr/bin/busybox rm -rf "$user_area"/* "$user_area"/.[!.]* "$user_area"/..?* 2>/dev/null
+              if [ -n "$(/usr/bin/busybox ls -A "$user_area" 2>/dev/null)" ]; then
+                recovery_log "[WARN] $user_area is not empty after erase"
+              fi
+            fi
+          done
+          RESTORE_OK=1
         else
           recovery_failed_log "Individual verification of the backup file failed. The file may be corrupted."
+          RESTORE_OK=0
         fi
 
         # 完了処理
-        echo "$BACKUP_FILE" > /mnt/var/lib/dtebx/needs_recovery
-        rm -f "$TARGET_LIST"
         rm -fr "$STAGING"
 
-        recovery_log "Recovery successful. Rebooting in 5 seconds..."
-        cp "$RECOVERY_LOG" "/mnt/var/log/recovery_$BACKUP_FILE.log"
-        sleep 5
-        reboot -f
+        if [ "${RESTORE_OK:-0}" -eq 1 ]; then
+          rm -f "$TARGET_LIST"
+          # needs_recovery は「復元が済んだので次のブートでアプリを組み直せ」の合図。
+          # 復元していないのに書くと、戻っていない構成で再ビルドが走る。∴ 成功時だけ書く。
+          echo "$BACKUP_FILE" > /mnt/var/lib/dtebx/needs_recovery
+          erase_record "completed"
+          recovery_log "Recovery successful. Rebooting in 5 seconds..."
+          cp "$RECOVERY_LOG" "/mnt/var/log/recovery_$BACKUP_FILE.log"
+          sleep 5
+          reboot -f
+        fi
+        # 失敗時は再起動せず既存 OS で起動を続ける(検証段で落ちているので中身は無傷)。
+        # 「表示が出ない」を「失敗」と読み替えられるよう、結果を独立ゾーンに明示して残す。
+        # 指示ファイルは .failed へ退避する(そのまま残すと毎ブート同じ壊れたバンドルで再試行する)。
+        erase_record "failed-verification"
+        recovery_failed_log "Restore was not performed. Booting the existing OS."
+        # ⚠ `[ -f x ] && mv` をブロック末尾に置くと、条件が偽のとき set -e でサブシェルごと
+        #    落ち、外側ハンドラが結果を "failed" で上書きしてしまう。if で書く。
+        if [ -f "$TARGET_LIST" ]; then
+          mv "$TARGET_LIST" "${TARGET_LIST}.failed"
+        fi
       else
         recovery_failed_log "Failed to download backup. Skipping recovery..."
+        erase_record "failed-fetch"
         [ -f "$TARGET_LIST" ] && mv "$TARGET_LIST" "${TARGET_LIST}.failed"
       fi
     fi
     ##### RECOVERY LOGIC END #####
   ) || {
     # サブシェルが1（エラー）で終了した場合の処理
+    # 復元の途中(in-progress)で落ちていれば「一部だけ書き換わった」状態なので、
+    # 失敗ではなく partial として残す。ここを区別しないと、運用側は「消えたのか
+    # 中途半端なのか」を判断できない。
+    if [ "$(/usr/bin/busybox cat "$ERASE_STATE" 2>/dev/null)" = "in-progress" ]; then
+      erase_record "partial"
+      recovery_failed_log "Recovery aborted midway; the device is in a PARTIALLY restored state."
+    else
+      erase_record "failed"
+    fi
     recovery_failed_log "Recovery failed, but proceeding to boot with existing OS..."
     [ -f "$TARGET_LIST" ] && mv "$TARGET_LIST" "${TARGET_LIST}.failed"
   }
