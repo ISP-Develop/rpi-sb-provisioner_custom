@@ -193,19 +193,96 @@ if [ -f "$keypath" ]; then
       recovery_log "Retrieving bundle: $BACKUP_FILE"
       mkdir -p "$STAGING"
 
-      recovery_log "Waiting for network link up..."
-      RETRY_NW=0
-      while [ $RETRY_NW -lt 10 ]; do
-        if /usr/bin/busybox ping -c 1 -W 1 "$TARGET_IP" > /dev/null 2>&1; then
-          recovery_log "Network is UP. Target $TARGET_IP is reachable."
+      # ★取得は「一発勝負」にしない（2026-08-22 実機ドリルで adm2 の消去がここで落ちた）。
+      #   旧実装は疎通確認が **ping** だったが、**この ADM 間経路の ICMP は返らない**
+      #   （実測: booted 同士でも `ping 172.16.0.1` は 100% ロス、TCP/80 は 1ms 未満で繋がる）。
+      #   ∴ ping のループは必ず外れる空待ちで切り分けにならず、その後の wget も 1 回だけだった。
+      #
+      # 🔴 **`wget` に `-T` を渡してはいけない**（2026-08-23 実機で判明）。
+      #   このビルドの busybox wget は `-T` を付けると **必ず Segmentation fault で死ぬ**
+      #   （`busybox wget -T 30 -O /tmp/x http://.../nonexistent` で exit=139 を再現）。
+      #   タイムアウトを効かせるつもりで足した結果、**動いていた取得を毎回落とす改悪**になり、
+      #   20 回すべて同じ場所で即死して消去が失敗した。呼び出しは**素のまま**にすること。
+      #
+      # ■ 打ち切り方
+      #   ・**総時間**で区切る（回数ではない）。wget 自身のタイムアウトは実測で約 3 分あり、
+      #     回数で持つと最悪が読めない。
+      #   ・★**シグナルで死んだ(rc>=128)ときは即やめる**。それはネットワーク条件ではなく
+      #     決定的な失敗なので、待っても回数を重ねても結果は変わらない（上の -T 事故がこれ）。
+      # ■ 疎通確認は **TCP** で行う（ping は使わない）
+      #
+      # 🔴 旧実装は `busybox ping` を 10 回試していたが、**この ADM 間経路(172.16.0.0/24)では
+      #   ICMP が返らない**。両系とも `icmp_echo_ignore_all=0` で iptables にも icmp ルールは無く、
+      #   同じ相手の **VLAN15 側(.41/.42)へは ping が通る**のに 172.16 側だけ返らない（2026-08-23 実測、
+      #   スイッチの ACE も VID/TCP-3389 のみで ICMP は落としていない＝原因は未解明）。
+      #   結果あの 10 回は**対向の状態と無関係に必ず全部外れる空待ち**で、切り分けの材料に
+      #   なっていなかった（「10 回失敗した後に実際に取ると成功する」の正体）。
+      #   ∴ **原因が分かっていない挙動に判定を預けない**。TCP で直接確かめる。
+      #
+      # ★`nc` の使い方に注意: このビルド(busybox v1.35.0)の nc には **`-z` が無い**。
+      #   `-w SEC HOST PORT </dev/null` の終了コードで見る（開=0 / 閉・到達不能=1 を実機確認）。
+      RDY=0
+      RDY_BUDGET_SEC=300
+      RDY_DEADLINE=$(( $(/usr/bin/busybox date +%s) + RDY_BUDGET_SEC ))
+      recovery_log "Waiting for $TARGET_IP:80 to accept connections (budget ${RDY_BUDGET_SEC}s)"
+      while :; do
+        if /usr/bin/busybox nc -w 5 "$TARGET_IP" 80 </dev/null >/dev/null 2>&1; then
+          RDY=1
+          recovery_log "$TARGET_IP:80 is accepting connections."
           break
         fi
-        recovery_log "Waiting for $TARGET_IP... ($((RETRY_NW+1))/10)"
-        /usr/bin/busybox sleep 1
-        RETRY_NW=$((RETRY_NW+1))
+        if [ $(/usr/bin/busybox date +%s) -ge $RDY_DEADLINE ]; then
+          recovery_log "$TARGET_IP:80 did not accept connections within ${RDY_BUDGET_SEC}s"
+          break
+        fi
+        /usr/bin/busybox sleep 5
       done
 
-      if /usr/bin/busybox wget -O "$STAGING/bundle.tar" "http://$TARGET_IP/backup/$BACKUP_FILE"; then
+      # ■ 取得本体
+      #
+      # 🔴 **`wget` に `-T` を渡してはいけない**（2026-08-23 実機で判明）。このビルドの
+      #   busybox wget は `-T` を付けると **必ず Segmentation fault で死ぬ**
+      #   (`busybox wget -T 30 -O /tmp/x http://.../nonexistent` で exit=139 を再現)。
+      #   タイムアウトを効かせるつもりで足した結果、**動いていた取得を毎回落とす改悪**になり、
+      #   20 回すべて即死して消去が失敗した。呼び出しは**素のまま**にすること。
+      #
+      # 打ち切りは **総時間**（回数だと wget 自身のタイムアウト約 3 分と掛け算になって最悪が読めない）。
+      # ★**シグナル死(rc>=128)は即やめる**。決定的な失敗なので待っても回数を重ねても変わらない。
+      DL_BUDGET_SEC=600
+      DL_WAIT=15
+      DL_OK=0
+      DL_ATTEMPT=0
+      DL_LAST_ERR=""
+      DL_ABORT=""
+      DL_DEADLINE=$(( $(/usr/bin/busybox date +%s) + DL_BUDGET_SEC ))
+      recovery_log "Fetching bundle from http://$TARGET_IP/backup/$BACKUP_FILE (budget ${DL_BUDGET_SEC}s)"
+      while :; do
+        DL_ATTEMPT=$((DL_ATTEMPT+1))
+        /usr/bin/busybox wget -O "$STAGING/bundle.tar" \
+          "http://$TARGET_IP/backup/$BACKUP_FILE" 2>"$STAGING/wget.err"
+        DL_RC=$?
+        if [ $DL_RC -eq 0 ]; then
+          DL_OK=1
+          recovery_log "Bundle downloaded on attempt $DL_ATTEMPT."
+          break
+        fi
+        DL_LAST_ERR=$(/usr/bin/busybox tail -n 2 "$STAGING/wget.err" 2>/dev/null | /usr/bin/busybox tr '\n' ' ')
+        /usr/bin/busybox rm -f "$STAGING/bundle.tar"
+        if [ $DL_RC -ge 128 ]; then
+          DL_ABORT="wget died with signal (rc=$DL_RC) - deterministic, retrying cannot help"
+          recovery_log "Download attempt $DL_ATTEMPT aborted: $DL_ABORT [$DL_LAST_ERR]"
+          break
+        fi
+        recovery_log "Download attempt $DL_ATTEMPT failed (rc=$DL_RC): $DL_LAST_ERR"
+        if [ $(/usr/bin/busybox date +%s) -ge $DL_DEADLINE ]; then
+          DL_ABORT="download budget of ${DL_BUDGET_SEC}s exhausted after $DL_ATTEMPT attempts"
+          recovery_log "$DL_ABORT"
+          break
+        fi
+        /usr/bin/busybox sleep $DL_WAIT
+      done
+
+      if [ $DL_OK -eq 1 ]; then
         recovery_log "Extracting bundle..."
         /usr/bin/busybox tar -C "$STAGING" -xf "$STAGING/bundle.tar"
         rm -f "$STAGING/bundle.tar"
@@ -385,7 +462,16 @@ if [ -f "$keypath" ]; then
           mv "$TARGET_LIST" "${TARGET_LIST}.failed"
         fi
       else
-        recovery_failed_log "Failed to download backup. Skipping recovery..."
+        # ★どちらで落ちたかを残す。「一度も TCP が張れなかった(対向が配っていない/経路が無い)」と
+        #   「張れたが取得しきれなかった(途中断・サーバ側エラー)」は原因も対処も別物。
+        # ★どこで落ちたかを残す。原因も対処も別物なので一緒くたにしない。
+        if [ $RDY -eq 0 ]; then
+          recovery_failed_log "Failed to download backup: $TARGET_IP:80 never accepted a TCP connection (the peer is not serving). Last error: $DL_LAST_ERR"
+        elif [ -n "$DL_ABORT" ]; then
+          recovery_failed_log "Failed to download backup: $DL_ABORT. Last error: $DL_LAST_ERR"
+        else
+          recovery_failed_log "Failed to download backup after $DL_ATTEMPT attempts (the peer accepted connections but the transfer did not complete). Last error: $DL_LAST_ERR"
+        fi
         erase_record "failed-fetch"
         [ -f "$TARGET_LIST" ] && mv "$TARGET_LIST" "${TARGET_LIST}.failed"
       fi
