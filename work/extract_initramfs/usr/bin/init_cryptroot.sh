@@ -8,6 +8,52 @@ set -x                    # 実行コマンドを逐一表示
 #trap 'echo "ERROR DETECTED. Dropping to shell..."; /bin/sh' 0 1 2 3 15
 #set -e
 
+
+##### C-311 / A-36: WDT の蹴り(initramfs 区間) #####
+# 蹴りはアプリ(570-1 adm-diag-control)が叩くことに決まったが、**rootfs に移るまでアプリは居ない**。
+# WDT は「最初の蹴り込みまで開始しない」仕様なので**電源投入直後は落ちない**が、
+# 一度武装した後のソフト再起動・リストアでは IC が数え続ける。この区間はリストアの
+# バンドル取得・展開に**十数分**かかるので、IC のタイムアウト 5 分を確実に超える。
+# ∴ この区間は initramfs が自分で蹴る。
+#
+# 口: GPIO8 を `/sys/class/gpio` で直接トグルする。ここではドライバ(adm-diag-wdt)は未ロードなので
+# GPIO8 は空いている(`config.txt` の `dtoverlay=spi0-1cs,cs0_pin=7` で SPI0 CE0 からも外してある)。
+# rootfs へ渡す前に**必ず止めて unexport する**——残すとドライバの probe が
+# `devm_gpiod_get` で GPIO8 を取れず、蹴り手が居なくなる。
+WDT_GPIO=8
+WDT_KICK_PID=""
+
+wdt_kick_start() {
+  if [ ! -d "/sys/class/gpio/gpio${WDT_GPIO}" ]; then
+    echo "${WDT_GPIO}" > /sys/class/gpio/export 2>/dev/null || {
+      echo "WDT: cannot export gpio${WDT_GPIO}; not kicking in initramfs"
+      return 1
+    }
+  fi
+  echo out > "/sys/class/gpio/gpio${WDT_GPIO}/direction" 2>/dev/null || return 1
+  (
+    while : ; do
+      v=$(/usr/bin/busybox cat "/sys/class/gpio/gpio${WDT_GPIO}/value" 2>/dev/null || echo 0)
+      if [ "$v" = "1" ]; then echo 0 > "/sys/class/gpio/gpio${WDT_GPIO}/value" 2>/dev/null
+      else echo 1 > "/sys/class/gpio/gpio${WDT_GPIO}/value" 2>/dev/null; fi
+      /usr/bin/busybox sleep 10
+    done
+  ) &
+  WDT_KICK_PID=$!
+  echo "WDT: kicking gpio${WDT_GPIO} from initramfs (pid=${WDT_KICK_PID})"
+}
+
+wdt_kick_stop() {
+  [ -n "$WDT_KICK_PID" ] && kill "$WDT_KICK_PID" 2>/dev/null
+  WDT_KICK_PID=""
+  # ★unexport を忘れるとドライバが GPIO8 を取れない。
+  [ -d "/sys/class/gpio/gpio${WDT_GPIO}" ] && echo "${WDT_GPIO}" > /sys/class/gpio/unexport 2>/dev/null
+  echo "WDT: stopped kicking from initramfs (handing over to 570-1 via adm-boot-dispatcher)"
+}
+
+wdt_kick_start || true
+##### C-311 END #####
+
 /usr/bin/cryptkey-fetch | /sbin/cryptsetup luksOpen /dev/mmcblk0p2 cryptroot || {
     echo "FATAL: LUKS open failed."
     sleep 30 && reboot -f
@@ -494,5 +540,9 @@ if [ -f "$keypath" ]; then
 fi
 exec > /dev/console 2>&1
 ##### custom end
+
+# ★C-311: rootfs へ渡す前に必ず止めて unexport する(ドライバが GPIO8 を掴めるようにする)。
+# ここから 570-1 の初回の蹴りまでの窓は adm-boot-dispatcher が背景で蹴って埋める。
+wdt_kick_stop || true
 
 systemctl switch-root /mnt /usr/sbin/init
