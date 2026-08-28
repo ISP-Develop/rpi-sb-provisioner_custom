@@ -129,8 +129,7 @@ initramfs = LUKS 環境にて開錠・マウントして実際の OS を起動�
 
 ```bash
 cd ~/rpi-sb-provisioner_custom/work/extract_initramfs
-find . -print0 | sudo cpio --null -ov --format=newc | zstd -z -19 -T0 \
-  -o ~/rpi-sb-provisioner_custom/work/cryptroot_initramfs.new
+find . -print0 | sudo cpio --null -ov --format=newc | zstd -z -19 -T0 -o ~/rpi-sb-provisioner_custom/work/cryptroot_initramfs.new
 ```
 
 ---

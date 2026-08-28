@@ -16,14 +16,39 @@ set -x                    # 実行コマンドを逐一表示
 # バンドル取得・展開に**十数分**かかるので、IC のタイムアウト 5 分を確実に超える。
 # ∴ この区間は initramfs が自分で蹴る。
 #
-# 口: GPIO8 を `/sys/class/gpio` で直接トグルする。ここではドライバ(adm-diag-wdt)は未ロードなので
-# GPIO8 は空いている(`config.txt` の `dtoverlay=spi0-1cs,cs0_pin=7` で SPI0 CE0 からも外してある)。
-# rootfs へ渡す前に**必ず止めて unexport する**——残すとドライバの probe が
-# `devm_gpiod_get` で GPIO8 を取れず、蹴り手が居なくなる。
-WDT_GPIO=8
+# 口: GPIO8 を `/sys/class/gpio` で直接トグルする。initramfs には `adm-gpiod` も CLI も居ないので
+# ここは直接叩くしかない(`config.txt` の `dtoverlay=spi0-1cs,cs0_pin=7` で SPI0 CE0 からも外してある)。
+# rootfs へ渡す前に**必ず止めて unexport する**——2026-08-27 の HW 対応(pi-gen eec93cb)で
+# ドライバは GPIO8 に触らなくなったが、rootfs 側の蹴り手は `adm-gpiod` 経由で同じピンを使うので、
+# sysfs に export したまま残すと競合しうる。
+# ★2026-08-28 実機で判明: `/sys/class/gpio` の旧インタフェースは **グローバル番号**を要求する。
+# 当初 `8` を export していたが、実機の RP1 は `pinctrl-rp1` の **base=569**(ngpio=54) なので
+# GPIO8 のグローバル番号は **577**。`8` はどのチップの範囲にも当たらず export が黙って失敗し、
+# `|| true` で握り潰していたため **initramfs の蹴りは一度も効いていなかった**
+# (起動から 2 分以上 `WDT_ON`=1 のままだったことで発覚)。
+# ★base は固定しない——カーネル/DT で変わる。**label が `pinctrl-rp1` のチップから毎回計算する**。
+WDT_GPIO_OFFSET=8
+WDT_GPIO=""
 WDT_KICK_PID=""
 
+wdt_gpio_num() {
+  for c in /sys/class/gpio/gpiochip*; do
+    [ -r "$c/label" ] || continue
+    if [ "$(/usr/bin/busybox cat "$c/label" 2>/dev/null)" = "pinctrl-rp1" ]; then
+      b=$(/usr/bin/busybox cat "$c/base" 2>/dev/null) || return 1
+      echo $((b + WDT_GPIO_OFFSET))
+      return 0
+    fi
+  done
+  return 1
+}
+
 wdt_kick_start() {
+  WDT_GPIO="$(wdt_gpio_num)" || {
+    echo "WDT: pinctrl-rp1 gpiochip not found; not kicking in initramfs"
+    return 1
+  }
+  echo "WDT: rp1 base -> global gpio ${WDT_GPIO} (offset ${WDT_GPIO_OFFSET})"
   if [ ! -d "/sys/class/gpio/gpio${WDT_GPIO}" ]; then
     echo "${WDT_GPIO}" > /sys/class/gpio/export 2>/dev/null || {
       echo "WDT: cannot export gpio${WDT_GPIO}; not kicking in initramfs"
@@ -46,8 +71,8 @@ wdt_kick_start() {
 wdt_kick_stop() {
   [ -n "$WDT_KICK_PID" ] && kill "$WDT_KICK_PID" 2>/dev/null
   WDT_KICK_PID=""
-  # ★unexport を忘れるとドライバが GPIO8 を取れない。
-  [ -d "/sys/class/gpio/gpio${WDT_GPIO}" ] && echo "${WDT_GPIO}" > /sys/class/gpio/unexport 2>/dev/null
+  # ★unexport を忘れると rootfs 側(adm-gpiod 経由)が同じピンを扱えない。
+  [ -n "$WDT_GPIO" ] && [ -d "/sys/class/gpio/gpio${WDT_GPIO}" ] && echo "${WDT_GPIO}" > /sys/class/gpio/unexport 2>/dev/null
   echo "WDT: stopped kicking from initramfs (handing over to 570-1 via adm-boot-dispatcher)"
 }
 
