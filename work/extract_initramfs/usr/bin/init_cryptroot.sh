@@ -44,6 +44,8 @@ wdt_gpio_num() {
 }
 
 wdt_kick_start() {
+  # 冪等(2 箇所から呼ぶ)。
+  [ -n "$WDT_KICK_PID" ] && return 0
   WDT_GPIO="$(wdt_gpio_num)" || {
     echo "WDT: pinctrl-rp1 gpiochip not found; not kicking in initramfs"
     return 1
@@ -76,7 +78,23 @@ wdt_kick_stop() {
   echo "WDT: stopped kicking from initramfs (handing over to 570-1 via adm-boot-dispatcher)"
 }
 
-wdt_kick_start || true
+# ★2026-08-28: **ここでは蹴らない。`/mnt` を見てから決める**(下の判定ブロック)。
+#
+# 蹴りたい理由: ソフト再起動では WDT は前のセッションから**武装したまま数え続ける**。
+#   停止(28 本のコンテナ down)＋起動＋rootfs 側の蹴り手が動き出すまでの合計は
+#   タイムアウト 5 分に迫るので、この区間は initramfs が埋めるべき。リストア/消去なら十数分かかる。
+#
+# ★ただし**無条件に蹴ってはいけない**。アクティベーション前の機体には rootfs 側の蹴り手が
+#   **誰も居ない**(`adm-boot-dispatcher` も `adm-diag-control` もアクティベーションで入る)。
+#   そこで蹴ると **WDT を武装させてしまい 5 分後に発火する**——実機で「再プロビジョニング直後の
+#   2 号機で前面 F が点滅」として発覚した(2026-08-28)。電源断の配線が入った後は
+#   **工場出荷直後の機体がアクティベーション前に自分で電源を落とす**＝プロビジョニング不成立。
+#
+# ∴ 判定は「**この機体は rootfs 側に蹴り手を持っているか**」= `/mnt` にアクティベーション後の
+#   `adm-diag-control.service` が在るか、で行う(ベンダ挙動や電源投入理由には依存しない)。
+#   ・在る  → 蹴る(ソフト再起動・リストア・消去のすべてを覆う。引き継ぎ手が居る)
+#   ・無い  → 蹴らない(未武装のまま放置するのが正しい。武装はアプリの初回の蹴りで行う)
+#   読めない/判定不能なら**蹴らない**(安全側。未武装の WDT は数えていないので発火しない)。
 ##### C-311 END #####
 
 /usr/bin/cryptkey-fetch | /sbin/cryptsetup luksOpen /dev/mmcblk0p2 cryptroot || {
@@ -133,6 +151,16 @@ fi
 
 /usr/bin/busybox mount /dev/mapper/cryptroot /mnt
 /usr/bin/busybox mount /dev/mmcblk0p1 /mnt/boot/firmware
+
+##### C-311: rootfs 側に蹴り手が居る機体だけ、この区間を蹴って埋める #####
+# 判定材料は 570-1 の unit(アクティベーションの make が置く)。上の C-311 ブロックの注記を参照。
+if [ -f /mnt/etc/systemd/system/adm-diag-control.service ]; then
+  echo "WDT: this node has a rootfs kicker (adm-diag-control.service present) -> kicking through this window"
+  wdt_kick_start || true
+else
+  echo "WDT: no rootfs kicker yet (not activated) -> NOT arming the watchdog here"
+fi
+##### C-311 END #####
 
 # 自動リサイズ処理の強制削除
 sed -i 's/init=\/usr\/lib\/raspi-config\/init_resize.sh//g' /mnt/boot/cmdline.txt
@@ -217,6 +245,13 @@ if [ -f "$keypath" ]; then
   RECOVERY_FAILED_FLAG="/mnt/var/log/recovery_failed.log"
   BACKUP_FILE=""
   [ -f "$TARGET_LIST" ] && BACKUP_FILE=$(cat "$TARGET_LIST" | /usr/bin/busybox head -n 1)
+  # ★C-311: 保険。通常は上の `/mnt` 判定で既に蹴り始めているが、判定が外れても
+  #   **リストア/消去に入るなら必ず蹴る**(この経路は十数分かかり、埋めないと 5 分で発火する)。
+  #   `wdt_kick_start` は冪等、`wdt_kick_stop` は起動していなければ no-op。
+  if [ -f "$TARGET_LIST" ]; then
+    echo "WDT: restore/erase path detected -> keeping the watchdog kicked during this window"
+    wdt_kick_start || true
+  fi
   recovery_log() {
     target_name="${BACKUP_FILE:-unknown_target}"
     msg="[target: $target_name] $*"
