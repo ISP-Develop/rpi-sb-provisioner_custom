@@ -169,11 +169,35 @@ rm -f /mnt/var/lib/systemd/deb-systemd-helper-enabled/resize2fs_once.service
 rm -f /mnt/etc/rc.d/resize2fs_once
 
 # ログパーティションの解錠とマウント
-keypath="/mnt/etc/cryptsetup-keys/p3_system.key"
-if [ -f "$keypath" ]; then
+#
+# ★C-381（2026-09-14 責任者裁定＝案A）: **p3 の鍵をファイルで持たない。**
+#   旧実装は p2 の中の `/etc/cryptsetup-keys/p3_system.key`（512B の乱数）で開いていた。
+#   ∴ p2 が OTP（＝その SoC であること）で守られているのに対し、**p3 は「そのファイルを
+#   持っていること」だけが条件**で、鍵ファイルさえ抜ければ eMMC を別筐体で開けた。
+#
+#       p3 の鍵 = HMAC-SHA256(key = OTP の 32 バイト, msg = 固定ラベル)
+#
+#   ★OTP の値そのものは使わない（使うと p3 のキースロットが p2 の秘密を保持することになる）。
+#   ⚠ **同じ導出が 3 か所に要る**＝ここ／`firstboot-partition-setup.sh`（作成）／
+#     `570-2` のリカバリブートイメージ（`create_init.sh`）。ラベルを変えると既存の p3 が開かない。
+P3_KEY_LABEL="dtebx-p3-luks-v1"
+
+derive_p3_key() {
+  # initramfs には `rpi-otp-private-key` が無いので `cryptkey-fetch`（base64 出力）を hex へ戻す。
+  # ★両者が同じ値を返すことは実機で突合済み（2026-09-14）。
+  # ⚠ **`od` を使わないこと**——この initramfs の `/usr/bin/od` は busybox への symlink だが、
+  #   同梱の busybox に **`od` アプレットが無い**（`base64` と `hexdump` は在る）ので失敗する。
+  #   `xxd` は**実体のバイナリ**（67KB）が在り、`cryptkey-fetch` 自身が `xxd -r -p` を使っている。
+  _otp="$(/usr/bin/cryptkey-fetch | /usr/bin/base64 -d 2>/dev/null | /usr/bin/xxd -p | tr -d ' \n')"
+  [ ${#_otp} -eq 64 ] || return 1
+  printf %s "${P3_KEY_LABEL}" | /usr/bin/openssl dgst -sha256 -mac HMAC -macopt "hexkey:${_otp}" -binary
+  _otp=""
+}
+
+if derive_p3_key > /dev/null 2>&1; then
   echo "Opening cryptlvm..."
   # 開錠
-  /sbin/cryptsetup luksOpen /dev/mmcblk0p3 "cryptlvm" --key-file "$keypath"
+  derive_p3_key | /sbin/cryptsetup luksOpen /dev/mmcblk0p3 "cryptlvm" --key-file -
   # LVMボリュームの有効化
   echo "Scanning LVM volumes (Forced)..."
   /bin/udevadm settle
@@ -337,7 +361,7 @@ if [ -f "$keypath" ]; then
           recovery_log "$TARGET_IP:80 is accepting connections."
           break
         fi
-        if [ $(/usr/bin/busybox date +%s) -ge $RDY_DEADLINE ]; then
+        if [ "$(/usr/bin/busybox date +%s)" -ge "$RDY_DEADLINE" ]; then
           recovery_log "$TARGET_IP:80 did not accept connections within ${RDY_BUDGET_SEC}s"
           break
         fi
@@ -380,7 +404,7 @@ if [ -f "$keypath" ]; then
           break
         fi
         recovery_log "Download attempt $DL_ATTEMPT failed (rc=$DL_RC): $DL_LAST_ERR"
-        if [ $(/usr/bin/busybox date +%s) -ge $DL_DEADLINE ]; then
+        if [ "$(/usr/bin/busybox date +%s)" -ge "$DL_DEADLINE" ]; then
           DL_ABORT="download budget of ${DL_BUDGET_SEC}s exhausted after $DL_ATTEMPT attempts"
           recovery_log "$DL_ABORT"
           break
@@ -597,6 +621,12 @@ if [ -f "$keypath" ]; then
     recovery_failed_log "Recovery failed, but proceeding to boot with existing OS..."
     [ -f "$TARGET_LIST" ] && mv "$TARGET_LIST" "${TARGET_LIST}.failed"
   }
+else
+  # ★C-381: 導出できないときは**黙って進まない**。旧実装は鍵ファイルが無いと
+  #   この区画ごと飛ばしていたので、「起動はするがデータ区画が無い」状態が
+  #   原因不明のまま残った。ここで必ず理由を出す（コンソールとログの両方に出る）。
+  echo "FATAL: could not derive the p3 LUKS key from OTP; the data partition will NOT be mounted." >&2
+  echo "       check: cryptkey-fetch / base64 / od / openssl in this initramfs, and the OTP private-key rows." >&2
 fi
 exec > /dev/console 2>&1
 ##### custom end
