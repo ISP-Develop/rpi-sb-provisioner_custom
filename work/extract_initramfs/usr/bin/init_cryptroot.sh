@@ -103,6 +103,12 @@ wdt_kick_stop() {
 }
 
 ##### custom start
+# ★2026-09-16 C-393: 自前カーネルの改名（uname -r = 0.0.1+deforion-rpi-2712）対策。
+#   libparted は uname を版数として sscanf し「0.0.1」を KERNEL_VERSION(2,4,0) 未満＝
+#   BLKPG 非対応の古いカーネルと誤判定して linux_disk_commit で abort する
+#   （実測: Assertion `_have_blkpg ()` failed）。∴ parted/partprobe だけ setarch --uname-2.6
+#   でくるみ、その子プロセスにのみ uname 2.6.x を見せる（他プロセスの uname は 0.0.1 のまま）。
+#   カーネル名は変えない方針（判定側を直す）。setarch は initramfs/rootfs 双方に在る。
 PART_SIZE=$(cat /sys/class/block/mmcblk0p2/size)
 TARGET_GIB=6
 # セクタ数の計算 (1GiB = 1024^3 / 512 = 2097152 sectors)
@@ -117,13 +123,13 @@ if [ "$PART_SIZE" -gt $((TARGET_P2_SIZE + 2048)) ]; then
   /sbin/resize2fs -p /dev/mapper/cryptroot "${TARGET_GIB}G"
   # 物理パーティションの強制リサイズ
   echo "Creating physical partition wall with parted..."
-  yes | /sbin/parted /dev/mmcblk0 ---pretend-input-tty resizepart 2 ${TARGET_P2_END}
+  yes | /usr/bin/setarch --uname-2.6 /sbin/parted /dev/mmcblk0 ---pretend-input-tty resizepart 2 ${TARGET_P2_END}
   # p3 を作成
-  /sbin/parted -s /dev/mmcblk0 mkpart primary ${TARGET_P3_START} 100%
+  /usr/bin/setarch --uname-2.6 /sbin/parted -s /dev/mmcblk0 mkpart primary ${TARGET_P3_START} 100%
   # LUKSレイヤーのリサイズ
   /usr/bin/cryptkey-fetch | /sbin/cryptsetup resize cryptroot
   # パーティションテーブルの変更をカーネルに通知
-  /sbin/partprobe /dev/mmcblk0 || true
+  /usr/bin/setarch --uname-2.6 /sbin/partprobe /dev/mmcblk0 || true
   /usr/bin/busybox mdev -s || true
   /bin/udevadm settle || true
   /usr/bin/busybox sleep 2
