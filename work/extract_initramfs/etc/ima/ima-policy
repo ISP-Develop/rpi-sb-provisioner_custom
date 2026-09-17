@@ -1,0 +1,36 @@
+# IMA 測定ポリシー（層 C。C-380 / CONSULT-701-602-addendum §4-2 をベース）
+# 署名済み boot.img 内の initramfs に置く。systemd(PID1) の ima_setup が起動時に
+# /etc/ima/ima-policy を自動ロードする（＝この経路で有効化される。WRITE_POLICY=n なので
+# 一度ロードすると再起動まで locked。森本さん申し入れ⑤を充足）。
+#
+# ★カーネルの IMA ポリシーパーサの制約（security/integrity/ima/ima_policy.c）:
+#   - 行頭 '#' の全行コメント・空行はスキップされる（∴ この注記は無害）。
+#   - ★★行末（インライン）コメントは非対応。'dont_measure fsmagic=... # proc' と書くと
+#     '#' がトークン化され UNKNOWN=# で invalid-policy → systemd が PID1 を freeze させる
+#     （2026-09-17 実機で踏んだ）。∴ ルール行に行末コメントを書かないこと。
+#
+# 方針: パスによる除外は設けず、実行の契機（起動・共有部品の読込・部品の読込）を全部測る。
+#       回答書の「除外パスから逃げられる」を、除外を作らないことで避ける。
+#       擬似ファイルシステムだけは fsmagic で外す（測る意味が無く量が破綻するため）。
+#   ⚠ tmpfs は除外しない（/tmp・/dev/shm からの実行が申し入れ 1-4 ① の典型のため）。
+#     森本さん原案は tmpfs を dont_measure しているが、当方の回答書方針に合わせ外す。
+#
+# 擬似FSの fsmagic 凡例（行末コメント不可のため、ここに全行コメントで対応を示す）:
+#   0x9fa0=proc  0x62656572=sysfs  0x64626720=debugfs  0x858458f6=ramfs  0x1cd1=devpts
+#   0x42494e4d=binfmt_misc  0x73636673=securityfs  0x6e736673=nsfs
+#   0x27e0eb=cgroup  0x63677270=cgroup2
+dont_measure fsmagic=0x9fa0
+dont_measure fsmagic=0x62656572
+dont_measure fsmagic=0x64626720
+dont_measure fsmagic=0x858458f6
+dont_measure fsmagic=0x1cd1
+dont_measure fsmagic=0x42494e4d
+dont_measure fsmagic=0x73636673
+dont_measure fsmagic=0x6e736673
+dont_measure fsmagic=0x27e0eb
+dont_measure fsmagic=0x63677270
+measure func=BPRM_CHECK
+measure func=FILE_MMAP mask=MAY_EXEC
+measure func=MODULE_CHECK
+measure func=KEXEC_KERNEL_CHECK
+measure func=POLICY_CHECK

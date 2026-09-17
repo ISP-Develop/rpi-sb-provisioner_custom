@@ -690,22 +690,11 @@ pcr_decoy_seed() {
 }
 pcr_decoy_seed || true
 
-# ★C-380 §1(b)/層 C: IMA 測定ポリシーを switch_root 直前に 1 回投入する。
-#   ここで載せると、本 rootfs 以降（systemd・全サービス・コンテナ）の execve/共有部品
-#   読込/部品読込が全部測られる窓になる（initramfs 自体は署名済み・pre-gap ゆえ測らない）。
-#   ポリシーは署名済み boot.img 内 /etc/ima/ima-policy＝改竄不能。WRITE_POLICY=n ビルドなので
-#   投入後は policy ファイルが消えて再起動まで locked（森本さん申し入れ⑤を充足）。
-#   ⚠ IMA 未有効／securityfs 未 mount のときは no-op（起動は妨げない）。
-[ -e /sys/kernel/security/ima/policy ] || \
-  /usr/bin/busybox mount -t securityfs securityfs /sys/kernel/security 2>/dev/null || true
-if [ -w /sys/kernel/security/ima/policy ] && [ -f /etc/ima/ima-policy ]; then
-  if /usr/bin/busybox cat /etc/ima/ima-policy > /sys/kernel/security/ima/policy 2>/dev/null; then
-    echo "[ima] measurement policy loaded (layer C)"
-  else
-    echo "[ima] WARN: failed to load /etc/ima/ima-policy into securityfs" >&2
-  fi
-else
-  echo "[ima] policy not loaded (IMA off or securityfs unavailable)" >&2
-fi
+# ★C-380 §1(b)/層 C: IMA 測定ポリシーは /etc/ima/ima-policy に置いてある。
+#   ここでは手動投入しない —— systemd(PID1) の ima_setup が initramfs 起動時に
+#   /etc/ima/ima-policy を自動でロード済み（WRITE_POLICY=n なので再起動まで locked）。
+#   IMA ポリシーはカーネル大域で switch_root をまたいで有効なので、本 rootfs 以降
+#   （systemd・全サービス・コンテナ）の execve/共有部品読込が測られる（ramfs 等は除外済み）。
+#   ⚠ ここで二重に cat > policy すると、locked 済みへの書込で毎起動 WARN が出るだけなので行わない。
 
 systemctl switch-root /mnt /usr/sbin/init
