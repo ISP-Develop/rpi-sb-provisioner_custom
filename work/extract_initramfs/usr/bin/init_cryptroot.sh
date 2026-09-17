@@ -641,4 +641,71 @@ exec > /dev/console 2>&1
 # ここから 570-1 の初回の蹴りまでの窓は adm-boot-dispatcher が背景で蹴って埋める。
 wdt_kick_stop || true
 
+# ★C-380 / 個体固有 PCR decoy（回答書 第2部 0 末尾「PCR に個体固有の値を 1 回積む」／
+#   MEMO-DECEPTION 5-0）。measured-boot 用 PCR 0〜7 を OTP 由来の個体固有値で非ゼロにし、
+#   奪取者が「PCR は使われていない」と即断できないようにする（時間稼ぎ）。
+#   ★アーキ寄与は無い（OTP から再現可能）。★封印には束縛しない（更新のたびに開け直す事態を避ける）。
+#   生の TPM2_PCR_Extend を /dev/tpmrm0 へ投げる（tpm2 ツールを積まないため）。
+#   ⚠ 失敗しても PCR はゼロのまま＝起動は妨げない（hc.pcr は従来どおり N/A へ落ちる）。
+#   ⚠ 実機で pcrread して 0〜7 が期待値になっているか要検証（生バイト構築のため）。
+#   ⚠ 特殊組込み exec のリダイレクト失敗は非対話シェルを終了させる（|| に来ない＝起動断）。
+#     ∴ デバイス open は必ず複合コマンド側 `{ … ; } 3<>"$dev"` に付ける（exec は使わない）。
+#     read は busybox timeout で 3s 上限（TPM ハング時も switch_root へ進む）。
+pcr_decoy_seed() {
+  # TPM ノードは実行時に kernel が作る。probe(#6217 で ~3.6s)を最大 5s 待つ。tpmrm0 優先
+  #（resource manager＝非排他。tpm0 は排他 open で EBUSY を得るため後回し）。
+  _dev=; _i=0
+  while :; do
+    if [ -e /dev/tpmrm0 ]; then _dev=/dev/tpmrm0; break; fi
+    if [ -e /dev/tpm0 ];   then _dev=/dev/tpm0;   break; fi
+    [ $_i -ge 5 ] && break
+    /usr/bin/busybox sleep 1; _i=$((_i+1))
+  done
+  [ -n "$_dev" ] && [ -e "$_dev" ] || { echo "[pcr-decoy] no TPM device (waited ${_i}s); skip"; return 0; }
+  _o="$(/usr/bin/cryptkey-fetch | /usr/bin/base64 -d 2>/dev/null | /usr/bin/xxd -p | tr -d ' \n')"
+  [ ${#_o} -eq 64 ] || { echo "[pcr-decoy] OTP unavailable; skip"; return 0; }
+  for _n in 0 1 2 3 4 5 6 7; do
+    # 積む digest = HMAC-SHA256(key=OTP, msg="dtebx-pcr-decoy-v<n>") の 32 バイト。
+    # ★このラベル "dtebx-pcr-decoy-v" は 575-1 hc.pcr の decoy_label と必ず一致させること
+    #   （adm-hc-p/util/Tpm.go。ずれると hc が全 PCR を「値違い」=WARN と誤判定する）。
+    #   ★結果 PCR 値はこの digest そのものではなく SHA256(0x00×32 ‖ digest)
+    #     （PCR は 0 から Extend され PCR_new = SHA256(PCR_old ‖ digest) となるため）。
+    #     575-1(hc.pcr) 側の期待値照合は、この「結果 PCR 値」で行うこと。
+    _d="$(printf 'dtebx-pcr-decoy-v%s' "$_n" \
+          | /usr/bin/openssl dgst -sha256 -mac HMAC -macopt "hexkey:${_o}" -binary \
+          | /usr/bin/xxd -p | tr -d ' \n')"
+    [ ${#_d} -eq 64 ] || continue
+    _ph="$(printf '%08x' "$_n")"
+    # TPM2_PCR_Extend: tag(8002) size(00000041=65) cc(00000182) pcrHandle authSize(00000009)
+    #   PWauth(sess=40000009 nonce=0000 attr=00 hmac=0000) count(00000001) alg(000b=SHA256) digest(32B)
+    _cmd="8002""00000041""00000182""${_ph}""00000009""40000009""0000""00""0000""00000001""000b""${_d}"
+    # open+write+read を 1 つの複合コマンドに畳む（exec を避け、失敗しても関数内に収める）。
+    # 応答は先頭 10B（tag2+size4+rc4）＝ hex 20 桁。rc は 13〜20 桁目。
+    _rc="$( { printf '%s' "$_cmd" | /usr/bin/xxd -r -p >&3 \
+              && /usr/bin/busybox timeout 3 /usr/bin/xxd -p -l 10 <&3 ; } 3<>"$_dev" 2>/dev/null \
+            | tr -d '\n' | cut -c13-20 )"
+    [ "$_rc" = "00000000" ] && echo "[pcr-decoy] PCR $_n seeded ($_dev)" || echo "[pcr-decoy] PCR $_n rc=${_rc:-none}"
+  done
+  _o=""
+}
+pcr_decoy_seed || true
+
+# ★C-380 §1(b)/層 C: IMA 測定ポリシーを switch_root 直前に 1 回投入する。
+#   ここで載せると、本 rootfs 以降（systemd・全サービス・コンテナ）の execve/共有部品
+#   読込/部品読込が全部測られる窓になる（initramfs 自体は署名済み・pre-gap ゆえ測らない）。
+#   ポリシーは署名済み boot.img 内 /etc/ima/ima-policy＝改竄不能。WRITE_POLICY=n ビルドなので
+#   投入後は policy ファイルが消えて再起動まで locked（森本さん申し入れ⑤を充足）。
+#   ⚠ IMA 未有効／securityfs 未 mount のときは no-op（起動は妨げない）。
+[ -e /sys/kernel/security/ima/policy ] || \
+  /usr/bin/busybox mount -t securityfs securityfs /sys/kernel/security 2>/dev/null || true
+if [ -w /sys/kernel/security/ima/policy ] && [ -f /etc/ima/ima-policy ]; then
+  if /usr/bin/busybox cat /etc/ima/ima-policy > /sys/kernel/security/ima/policy 2>/dev/null; then
+    echo "[ima] measurement policy loaded (layer C)"
+  else
+    echo "[ima] WARN: failed to load /etc/ima/ima-policy into securityfs" >&2
+  fi
+else
+  echo "[ima] policy not loaded (IMA off or securityfs unavailable)" >&2
+fi
+
 systemctl switch-root /mnt /usr/sbin/init
