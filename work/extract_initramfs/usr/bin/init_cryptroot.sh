@@ -652,6 +652,14 @@ wdt_kick_stop || true
 #     ∴ デバイス open は必ず複合コマンド側 `{ … ; } 3<>"$dev"` に付ける（exec は使わない）。
 #     read は busybox timeout で 3s 上限（TPM ハング時も switch_root へ進む）。
 pcr_decoy_seed() {
+  # ★1 起動 1 回だけ（冪等化）。cryptroot.service は同一 initramfs 内で複数回実行されうる
+  #   （実機で 1 起動につき 3 回走行を観測。switch_root 前ゆえ PCR はリセットされない）。
+  #   PCR_Extend は累積（PCR_new=SHA256(PCR_old‖d)）なので、複数回走ると値が
+  #   SHA256^n(0‖d) の chain になり、hc.pcr の単発期待 SHA256(0‖d) と食い違う。
+  #   ∴ /run(tmpfs, 起動内で永続・switch_root をまたいでも可)に marker を置き、
+  #   最初に TPM+OTP が揃った 1 回だけ積む。以降の再走は skip＝常に単発 extend。
+  _mark=/run/pcr-decoy.seeded
+  [ -e "$_mark" ] && { echo "[pcr-decoy] already seeded this boot; skip"; return 0; }
   # TPM ノードは実行時に kernel が作る。probe(#6217 で ~3.6s)を最大 5s 待つ。tpmrm0 優先
   #（resource manager＝非排他。tpm0 は排他 open で EBUSY を得るため後回し）。
   _dev=; _i=0
@@ -664,6 +672,9 @@ pcr_decoy_seed() {
   [ -n "$_dev" ] && [ -e "$_dev" ] || { echo "[pcr-decoy] no TPM device (waited ${_i}s); skip"; return 0; }
   _o="$(/usr/bin/cryptkey-fetch | /usr/bin/base64 -d 2>/dev/null | /usr/bin/xxd -p | tr -d ' \n')"
   [ ${#_o} -eq 64 ] || { echo "[pcr-decoy] OTP unavailable; skip"; return 0; }
+  # TPM+OTP が揃った＝commit。ここで marker を立て、以降の再走は先頭 check で skip させる
+  #（device/OTP がまだ揃わない早期走行では marker を立てないので、後続走行で積める）。
+  : > "$_mark" 2>/dev/null || true
   for _n in 0 1 2 3 4 5 6 7; do
     # 積む digest = HMAC-SHA256(key=OTP, msg="dtebx-pcr-decoy-v<n>") の 32 バイト。
     # ★このラベル "dtebx-pcr-decoy-v" は 575-1 hc.pcr の decoy_label と必ず一致させること
