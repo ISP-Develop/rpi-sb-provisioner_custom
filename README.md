@@ -335,6 +335,77 @@ apt-mark showhold   # rpi-sb-provisioner が出ること
 | `apt-mark showhold` | `rpi-sb-provisioner` |
 | 書き込み時の `/var/log/rpi-sb-provisioner/<serial>/provisioner.log` | **`Fastboot transport forced to USB for device <serial>` が出る**（出なければ §3.3 が効いていない）。`Testing Fastboot IP connectivity` と `tcp:` は**出ない** |
 
+### 3.7 `rpi-sb-provisioner.sh` へのパッチ（dm-verity／overlay モジュールの埋め込み・2026-09-25）
+
+> dm-verity 下層＋overlay 上層のルート構成（`~/deforion/docs/assets/20260925_verity_overlay_adm2b_test_plan.md`）用。
+> `init_cryptroot.sh` が initramfs 内で `modprobe overlay`／`modprobe dm-verity` するので、§3.2 の btrfs と同じ形で
+> `dm-verity`（依存 `dm-bufio`）と `overlay` を `augment_initramfs` に足す。冪等（マーカー `DTEBX_VERITY_OVERLAY_MODULES`）。
+> 2026-09-25 prov に適用済み（退避 `rpi-sb-provisioner.sh.bak.verity.20260925163034`）。
+
+```bash
+# 念のためバックアップ
+sudo cp -a /usr/bin/rpi-sb-provisioner.sh \
+  /usr/bin/rpi-sb-provisioner.sh.bak.verity.$(date +%Y%m%d%H%M%S)
+# パッチ実行
+sudo python3 - <<'PY'
+from pathlib import Path
+path = Path("/usr/bin/rpi-sb-provisioner.sh")
+s = path.read_text()
+MARK = "DTEBX_VERITY_OVERLAY_MODULES"
+if MARK in s:
+    print("already patched"); raise SystemExit(0)
+func_pos = s.find("augment_initramfs()")
+if func_pos < 0: raise SystemExit("augment_initramfs() not found")
+insert_pos = s.find("# Generate depmod information", func_pos)
+if insert_pos < 0: raise SystemExit("depmod insertion point not found")
+insert_pos = s.rfind("\n", 0, insert_pos) + 1
+block = r'''    # DTEBX_VERITY_OVERLAY_MODULES: dm-verity (+dm-bufio) and overlay for the verity/overlay root (2026-09-25).
+    command -v modprobe >/dev/null 2>&1 || die "modprobe not found on provisioner host"
+    for kdir in "${rootfs_mount}"/usr/lib/modules/*; do
+        [ -d "${kdir}" ] || continue
+        kernel="$(basename "${kdir}")"
+        for vmod in dm-verity overlay; do
+            depfile="${TMP_DIR}/${vmod}-deps.${kernel}"
+            errfile="${TMP_DIR}/${vmod}-deps.${kernel}.err"
+            if ! modprobe -d "${rootfs_mount}" -S "${kernel}" --show-depends "${vmod}" > "${depfile}" 2> "${errfile}"; then
+                cat "${errfile}" >&2 || true
+                die "Failed to resolve ${vmod} module dependencies for ${kernel}"
+            fi
+            while read -r action modpath rest; do
+                [ "${action}" = "insmod" ] || continue
+                rel="${modpath#${rootfs_mount}/}"
+                rel="${rel#/}"
+                case "${rel}" in
+                    lib/modules/*) rel="usr/${rel}" ;;
+                esac
+                if [ ! -f "${rootfs_mount}/${rel}" ]; then
+                    echo "Missing ${vmod} dependency: ${modpath}" >&2
+                    die "Failed to copy ${vmod} dependency for ${kernel}"
+                fi
+                ( cd "${rootfs_mount}" || exit 1; cp -p --parents "${rel}" "${initramfs_dir}" ) || die "Failed to copy ${rel} into initramfs"
+            done < "${depfile}"
+            rm -f "${depfile}" "${errfile}"
+        done
+    done
+    for vko in 'drivers/md/dm-verity.ko' 'fs/overlayfs/overlay.ko'; do
+        if ! find "${initramfs_dir}usr/lib/modules" -path "*/kernel/${vko}*" | grep -q .; then
+            die "${vko} was not copied into initramfs"
+        fi
+    done
+
+'''
+s = s[:insert_pos] + block + s[insert_pos:]
+path.write_text(s)
+print("patched /usr/bin/rpi-sb-provisioner.sh")
+PY
+
+# 念のため構文チェック
+sudo sh -n /usr/bin/rpi-sb-provisioner.sh
+grep -n "DTEBX_VERITY_OVERLAY_MODULES" /usr/bin/rpi-sb-provisioner.sh
+```
+
+反映確認は §3.5 と同じ。戻すときは `.bak.verity.*` を `/usr/bin/rpi-sb-provisioner.sh` に戻す。
+
 ### 3.6 再プロビジョニング時の注意
 
 - セキュアブート設定済みの端末は EEPROM と boot.img の署名不一致で失敗しやすい → `/etc/rpi-sb-provisioner/special-reprovision-device/<シリアル下8桁>` を touch する。

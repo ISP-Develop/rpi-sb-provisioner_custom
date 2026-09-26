@@ -109,18 +109,40 @@ wdt_kick_stop() {
 #   （実測: Assertion `_have_blkpg ()` failed）。∴ parted/partprobe だけ setarch --uname-2.6
 #   でくるみ、その子プロセスにのみ uname 2.6.x を見せる（他プロセスの uname は 0.0.1 のまま）。
 #   カーネル名は変えない方針（判定側を直す）。setarch は initramfs/rootfs 双方に在る。
+
+##### dm-verity 下層＋overlay 上層（2026-09-25 検証・一周目 r2） #####
+# p2(cryptroot) の中を [下層 ext4 | 上層 ext4 | verity ハッシュ木(末尾 64MiB 固定)] に切る。
+#   一周目(クリーンインストール直後の初回起動): ext4 を最小まで縮小(resize2fs -M)し、その結果のブロック数を下層サイズにする
+#     → p2 を 6GiB に・p3 作成(従来どおり) → dm-linear ×3 → veritysetup format(1 回きり) → root hash を p1 に残す
+#     → 上層を mke2fs → 下層を ro,noload で /lower に敷き overlay を /mnt に組む → 以降は従来どおり。
+#   2 回目以降: 末尾のハッシュ木の verity スーパーブロック(Data blocks)から下層サイズを復元して切る。
+#   二周目: /etc/dtebx/root.hash(署名済み initramfs に同梱)が在れば veritysetup open した下層を使う。
+#   ⚠ r1 の失敗(2026-09-25): 固定 2560M への縮小が「最小 844900 ブロック」で拒否されたのに先へ進み、
+#      58GB 幾何のままの ext4 の先頭だけを切って e2fsck を掛けて壊した。∴ r2 は「縮小の結果」から切り、
+#      縮小・切り出し・format のどれかが失敗したら**何も触らず**従来どおり cryptroot を rw で載せて起動する。
+#   ⚠ 従来の「初回に 6G へ縮小 → 全域へ再拡張」「毎起動 resize2fs -f」は廃止。fstab は overlay 後に上層へ書く。
+#   設計: ~/deforion/docs/assets/20260925_verity_overlay_adm2b_test_plan.md
+DTEBX_HASH_MIB=64
+DTEBX_HASH_SECTORS=$((DTEBX_HASH_MIB * 2048))
+FS_BLOCKS=""        # 一周目: 縮小後の ext4 ブロック数(4k)。dm-linear の下層サイズの元
+VERITY_OK=0         # 下層/上層/ハッシュ木を切り出せたか
+
 PART_SIZE=$(cat /sys/class/block/mmcblk0p2/size)
 TARGET_GIB=6
 # セクタ数の計算 (1GiB = 1024^3 / 512 = 2097152 sectors)
-# 20GiB の場合: 20 * 2097152 = 41943040
 TARGET_P2_SIZE=$((TARGET_GIB * 2097152))
 TARGET_P2_END="${TARGET_P2_SIZE}s"
 TARGET_P3_START="$((TARGET_P2_SIZE + 1))s"
 if [ "$PART_SIZE" -gt $((TARGET_P2_SIZE + 2048)) ]; then
-  # ファイルシステムを強制的に縮小する
+  # 初回起動: ext4 を最小まで縮小してから p2 を 6GiB に切り、p3 を作る
   /sbin/e2fsck -y -f /dev/mapper/cryptroot || true
-  echo "Starting resize2fs to ${TARGET_GIB}G..."
-  /sbin/resize2fs -p /dev/mapper/cryptroot "${TARGET_GIB}G"
+  echo "Starting resize2fs -M (shrink to minimum; verity lower)..."
+  # 2 回掛ける: 1 回目で inode テーブル等が減り、2 回目でさらに縮む(縮まなければ Nothing to do)
+  /sbin/resize2fs -M -p /dev/mapper/cryptroot > /tmp/resize1.out 2>&1; /usr/bin/busybox cat /tmp/resize1.out
+  /sbin/resize2fs -M -p /dev/mapper/cryptroot > /tmp/resize2.out 2>&1; /usr/bin/busybox cat /tmp/resize2.out
+  FS_BLOCKS=$(/usr/bin/busybox cat /tmp/resize2.out /tmp/resize1.out | /usr/bin/busybox sed -n 's/.*is now \([0-9][0-9]*\) (4k) blocks long.*/\1/p; s/.*is already \([0-9][0-9]*\) (4k) blocks long.*/\1/p' | /usr/bin/busybox head -n 1)
+  echo "verity: lower ext4 = ${FS_BLOCKS:-?} (4k) blocks"
+  /sbin/e2fsck -y -f /dev/mapper/cryptroot || true
   # 物理パーティションの強制リサイズ
   echo "Creating physical partition wall with parted..."
   yes | /usr/bin/setarch --uname-2.6 /sbin/parted /dev/mmcblk0 ---pretend-input-tty resizepart 2 ${TARGET_P2_END}
@@ -133,30 +155,116 @@ if [ "$PART_SIZE" -gt $((TARGET_P2_SIZE + 2048)) ]; then
   /usr/bin/busybox mdev -s || true
   /bin/udevadm settle || true
   /usr/bin/busybox sleep 2
-  # 最終リサイズ
-  /sbin/resize2fs -f /dev/mapper/cryptroot
-  yes | /sbin/e2fsck -y -f /dev/mapper/cryptroot || true
-  # fstabの調整
-  echo "First boot: Fixing PARTUUIDs..."
-  /usr/bin/busybox mount /dev/mapper/cryptroot /mnt || {
-    echo "FATAL: cryptroot mount failed."
-    sleep 30 && reboot -f
-  }
-  NEW_P1_UUID=$(blkid -s PARTUUID -o value /dev/mmcblk0p1)
-  NEW_P2_UUID=$(blkid -s PARTUUID -o value /dev/mmcblk0p2)
-  if [ -n "$NEW_P1_UUID" ] && [ -n "$NEW_P2_UUID" ]; then
-    sed -i "s/PARTUUID=[^ ]*-01/PARTUUID=${NEW_P1_UUID}/g" /mnt/etc/fstab
-    sed -i "s/PARTUUID=[^ ]*-02/PARTUUID=${NEW_P2_UUID}/g" /mnt/etc/fstab
-  fi
-  /usr/bin/busybox umount /mnt
 else
-  echo "Already resized. Skipping..."
-  /sbin/resize2fs -f /dev/mapper/cryptroot
-  yes | /sbin/e2fsck -y -f /dev/mapper/cryptroot || true
+  echo "Partition already shaped. Skipping..."
 fi
 
-/usr/bin/busybox mount /dev/mapper/cryptroot /mnt
+# dm-linear で切る(udev は動いていないので同期を待たない。ノードは自分で確かめる)
+dtebx_dm_create() {
+  # $1=name $2=table
+  /sbin/dmsetup create "$1" --noudevsync --table "$2" || return 1
+  if [ ! -e "/dev/mapper/$1" ]; then
+    mm=$(/sbin/dmsetup info -c --noheadings -o major,minor "$1" 2>/dev/null)
+    [ -n "$mm" ] && /usr/bin/busybox mknod "/dev/mapper/$1" b "${mm%:*}" "${mm#*:}"
+  fi
+  [ -e "/dev/mapper/$1" ]
+}
+dtebx_carve() {
+  CRYPT_SECTORS=$(/usr/bin/busybox blockdev --getsz /dev/mapper/cryptroot) || return 1
+  HASH_START=$(( (CRYPT_SECTORS - DTEBX_HASH_SECTORS) / 8 * 8 ))
+  [ "$HASH_START" -gt 0 ] || return 1
+  dtebx_dm_create dtebx_hash "0 ${DTEBX_HASH_SECTORS} linear /dev/mapper/cryptroot ${HASH_START}" || return 1
+  FORMAT_NEEDED=0
+  if /sbin/veritysetup dump /dev/mapper/dtebx_hash > /tmp/verity_dump.out 2>&1; then
+    DATA_BLOCKS=$(/usr/bin/busybox awk '/^Data blocks:/{print $3}' /tmp/verity_dump.out)
+    echo "verity: hash tree present, data blocks = ${DATA_BLOCKS}"
+  else
+    [ -n "$FS_BLOCKS" ] || { echo "verity: no hash tree and no fresh shrink result -> cannot carve"; return 1; }
+    DATA_BLOCKS="$FS_BLOCKS"
+    FORMAT_NEEDED=1
+  fi
+  [ -n "$DATA_BLOCKS" ] && [ "$DATA_BLOCKS" -gt 0 ] || return 1
+  LOWER_SECTORS=$((DATA_BLOCKS * 8))
+  UPPER_SECTORS=$((HASH_START - LOWER_SECTORS))
+  [ "$UPPER_SECTORS" -gt 262144 ] || { echo "verity: upper too small (${UPPER_SECTORS} sectors)"; return 1; }
+  dtebx_dm_create dtebx_lower "0 ${LOWER_SECTORS} linear /dev/mapper/cryptroot 0" || return 1
+  dtebx_dm_create dtebx_upper "0 ${UPPER_SECTORS} linear /dev/mapper/cryptroot ${LOWER_SECTORS}" || return 1
+  echo "verity: layout lower=0..${LOWER_SECTORS} upper=${LOWER_SECTORS}..${HASH_START} hash=${HASH_START}..$((HASH_START + DTEBX_HASH_SECTORS)) (sectors)"
+  if [ "$FORMAT_NEEDED" = 1 ]; then
+    # 1 回きり: 下層を clean にしてから format。以後、下層には一切書かない。
+    echo "verity: formatting hash tree (one-time)"
+    # -y で軽微な修正(時刻の未来判定など)は許し、未修正(rc>=4)や幾何不整合(rc>=8)なら止める
+    /sbin/e2fsck -f -y /dev/mapper/dtebx_lower; rc=$?
+    [ "$rc" -le 1 ] || { echo "verity: e2fsck on lower rc=${rc} -> abort"; return 1; }
+    /sbin/veritysetup format /dev/mapper/dtebx_lower /dev/mapper/dtebx_hash > /tmp/verity_format.out 2>&1 || { /usr/bin/busybox cat /tmp/verity_format.out; return 1; }
+    /usr/bin/busybox cat /tmp/verity_format.out
+    ROOT_HASH=$(/usr/bin/busybox awk '/^Root hash:/{print $3}' /tmp/verity_format.out)
+    [ ${#ROOT_HASH} -eq 64 ] || return 1
+    echo "verity: root hash = ${ROOT_HASH}"
+    /sbin/mke2fs -t ext4 -L UPPER -F /dev/mapper/dtebx_upper || return 1
+    # 二周目で prov が拾えるよう p1(FAT) に残す(8.3 名)
+    /usr/bin/busybox mkdir -p /p1
+    if /usr/bin/busybox mount /dev/mmcblk0p1 /p1; then
+      echo "${ROOT_HASH}" > /p1/ROOTHASH.TXT
+      /usr/bin/busybox cp /tmp/verity_format.out /p1/VERITY.TXT
+      /usr/bin/busybox sync
+      /usr/bin/busybox umount /p1
+    fi
+  fi
+  return 0
+}
+if dtebx_carve; then VERITY_OK=1; else echo "FATAL(verity): carve failed -> legacy boot from cryptroot"; fi
+
+ROOT_ASSEMBLED=0
+if [ "$VERITY_OK" = 1 ]; then
+  LOWER_DEV=/dev/mapper/dtebx_lower
+  if [ -s /etc/dtebx/root.hash ]; then
+    # 二周目: 署名済み initramfs に埋めた root hash で下層を verity 越しに読む
+    /bin/modprobe dm-verity || echo "WARN: modprobe dm-verity failed"
+    if /sbin/veritysetup open /dev/mapper/dtebx_lower dtebx_rootro /dev/mapper/dtebx_hash "$(/usr/bin/busybox cat /etc/dtebx/root.hash)"; then
+      LOWER_DEV=/dev/mapper/dtebx_rootro
+      [ -e "$LOWER_DEV" ] || {
+        mm=$(/sbin/dmsetup info -c --noheadings -o major,minor dtebx_rootro 2>/dev/null)
+        [ -n "$mm" ] && /usr/bin/busybox mknod "$LOWER_DEV" b "${mm%:*}" "${mm#*:}"
+      }
+      echo "verity: opened lower as dtebx_rootro"
+    else
+      echo "FATAL(verity): open failed -> plain lower"
+    fi
+  fi
+  /bin/modprobe overlay || echo "WARN: modprobe overlay failed (might be built-in)"
+  /usr/bin/busybox mkdir -p /lower /upper
+  if /usr/bin/busybox mount -t ext4 -o ro,noload "$LOWER_DEV" /lower \
+     && /usr/bin/busybox mount -t ext4 /dev/mapper/dtebx_upper /upper \
+     && /usr/bin/busybox mkdir -p /upper/upper /upper/work \
+     && /usr/bin/busybox mount -t overlay overlay -o lowerdir=/lower,upperdir=/upper/upper,workdir=/upper/work /mnt; then
+    echo "overlay: root assembled (lower=${LOWER_DEV})"
+    ROOT_ASSEMBLED=1
+    # fstab の "/"(/dev/mapper/cryptroot)行を落とす(上層に書かれる)。残すと fsck/remount が親デバイスへ向く
+    /usr/bin/busybox sed -i '/^\/dev\/mapper\/cryptroot[[:space:]]/d' /mnt/etc/fstab
+  else
+    echo "FATAL(overlay): assembly failed"
+    /usr/bin/busybox umount /mnt 2>/dev/null
+    /usr/bin/busybox umount /upper 2>/dev/null
+    /usr/bin/busybox umount /lower 2>/dev/null
+  fi
+fi
+if [ "$ROOT_ASSEMBLED" != 1 ]; then
+  # フォールバック: 従来どおり cryptroot 全体を rw でルートにする(起動は続ける)。
+  # ⚠ 切り出し済み(VERITY_OK=1)なら下層に書いてしまい hash は無効になるが、文鎮よりよい。
+  echo "legacy: mounting /dev/mapper/cryptroot rw on /mnt"
+  /sbin/dmsetup remove dtebx_upper 2>/dev/null; /sbin/dmsetup remove dtebx_lower 2>/dev/null; /sbin/dmsetup remove dtebx_hash 2>/dev/null
+  /usr/bin/busybox mount /dev/mapper/cryptroot /mnt || { echo "FATAL: cryptroot mount failed."; sleep 30 && reboot -f; }
+fi
+# 初回起動: プロビジョナが partinit で新しいパーティションテーブルを作るので、pi-gen 時の PARTUUID は
+# 一致しない。fstab の /boot/firmware 行を実機の PARTUUID に合わせる(旧 :145-150 と同じ。overlay 下では上層に書かれる)。
+NEW_P1_UUID=$(blkid -s PARTUUID -o value /dev/mmcblk0p1)
+if [ -n "$NEW_P1_UUID" ] && [ -f /mnt/etc/fstab ]; then
+  /usr/bin/busybox sed -i "s/PARTUUID=[^ ]*-01/PARTUUID=${NEW_P1_UUID}/g" /mnt/etc/fstab
+fi
+echo "fstab after fix:"; /usr/bin/busybox cat /mnt/etc/fstab
 /usr/bin/busybox mount /dev/mmcblk0p1 /mnt/boot/firmware
+##### dm-verity/overlay END #####
 
 ##### C-311: rootfs 側に蹴り手が居る機体だけ、この区間を蹴って埋める #####
 # 判定材料は 570-1 の unit(アクティベーションの make が置く)。上の C-311 ブロックの注記を参照。
@@ -168,11 +276,7 @@ else
 fi
 ##### C-311 END #####
 
-# 自動リサイズ処理の強制削除
-sed -i 's/init=\/usr\/lib\/raspi-config\/init_resize.sh//g' /mnt/boot/cmdline.txt
-# 使い捨てスクリプトの「残骸」や「フラグファイル」を念のため掃除
-rm -f /mnt/var/lib/systemd/deb-systemd-helper-enabled/resize2fs_once.service
-rm -f /mnt/etc/rc.d/resize2fs_once
+# (2026-09-25) cmdline.txt の init_resize 削除・resize2fs_once の掃除は廃止(overlay 下では上層へのコピーアップになるだけ)
 
 # ログパーティションの解錠とマウント
 #
@@ -656,9 +760,11 @@ pcr_decoy_seed() {
   #   （実機で 1 起動につき 3 回走行を観測。switch_root 前ゆえ PCR はリセットされない）。
   #   PCR_Extend は累積（PCR_new=SHA256(PCR_old‖d)）なので、複数回走ると値が
   #   SHA256^n(0‖d) の chain になり、hc.pcr の単発期待 SHA256(0‖d) と食い違う。
-  #   ∴ /run(tmpfs, 起動内で永続・switch_root をまたいでも可)に marker を置き、
+  #   ∴ marker を initramfs ルート / に置く（ramfs＝常に書け、同一起動内で永続）。
+  #   ★2026-09-18: 当初 /run に置いたが実機で marker が効かず triple のままだった
+  #     （/run が書けず : > が失敗＝毎回 seed）。/ は確実に書けるので / へ変更。
   #   最初に TPM+OTP が揃った 1 回だけ積む。以降の再走は skip＝常に単発 extend。
-  _mark=/run/pcr-decoy.seeded
+  _mark=/pcr-decoy.seeded
   [ -e "$_mark" ] && { echo "[pcr-decoy] already seeded this boot; skip"; return 0; }
   # TPM ノードは実行時に kernel が作る。probe(#6217 で ~3.6s)を最大 5s 待つ。tpmrm0 優先
   #（resource manager＝非排他。tpm0 は排他 open で EBUSY を得るため後回し）。
@@ -707,5 +813,27 @@ pcr_decoy_seed || true
 #   IMA ポリシーはカーネル大域で switch_root をまたいで有効なので、本 rootfs 以降
 #   （systemd・全サービス・コンテナ）の execve/共有部品読込が測られる（ramfs 等は除外済み）。
 #   ⚠ ここで二重に cat > policy すると、locked 済みへの書込で毎起動 WARN が出るだけなので行わない。
+
+# ★C-380 診断（計測。原因局在化用。データは /mnt=LUKS 解錠済みの永続へ書く。診断のみ・起動を妨げない）。
+#   目的1: switch_root 時点で replay(一覧)==PCR10 が成立するか＝一覧外 extend が
+#          「早期(kernel/initramfs)」か「switch_root 後(runtime)」かを切り分ける。
+#   目的2: runs.log の行数で init_cryptroot の 1 起動あたり実行回数を確定（marker 検証）。
+pcr10_read_raw() {
+  # 生 TPM2_PCR_Read(sha256:10) → 応答(62B)末尾 32B(=PCR10) を hex で返す（tpm2 ツールが無いため）。
+  _rdev=/dev/tpmrm0; [ -e "$_rdev" ] || _rdev=/dev/tpm0; [ -e "$_rdev" ] || return 0
+  # tag(8001) size(00000014=20) cc(0000017e) count(1) alg(000b=SHA256) sizeofSelect(03) select(000400=PCR10)
+  { printf '%s' "8001""00000014""0000017e""00000001""000b""03""000400" | /usr/bin/xxd -r -p >&3 \
+      && /usr/bin/busybox timeout 3 /usr/bin/xxd -p -l 62 <&3 ; } 3<>"$_rdev" 2>/dev/null \
+    | tr -d ' \n' | tail -c 64
+}
+pcr_diag() {
+  _dg=/mnt/pcr-diag
+  /usr/bin/busybox mkdir -p "$_dg" 2>/dev/null || return 0
+  echo "run mark=$([ -e /pcr-decoy.seeded ] && echo yes || echo no)" >> "$_dg/runs.log" 2>/dev/null
+  /usr/bin/busybox cat /sys/kernel/security/ima/runtime_measurements_count > "$_dg/count" 2>/dev/null
+  /usr/bin/busybox cat /sys/kernel/security/ima/binary_runtime_measurements_sha256 > "$_dg/ima_list.bin" 2>/dev/null
+  pcr10_read_raw > "$_dg/pcr10.hex" 2>/dev/null
+}
+pcr_diag || true
 
 systemctl switch-root /mnt /usr/sbin/init
