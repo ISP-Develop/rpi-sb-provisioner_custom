@@ -403,21 +403,25 @@ if derive_p3_key > /dev/null 2>&1; then
     fi
   }
   # 独立したパス
-  mount_lv "backup" "/backup"
+  # DEFORION 層 C 項 4d（ハブ docs/42 §7 / docs/43 項 4d・J-14・J-19）: 書ける LV は noexec,nodev,nosuid。
+  #   実行物は下層（OS イメージ）に焼く（項 4c）。例外: lv_docker（コンテナ rootfs は exec 要＝層 C の一覧で守る）と
+  #   lv_adm_ini（560-2 本体と自己更新を残す＝J-19）。
+  NOEXEC="noexec,nodev,nosuid"
+  mount_lv "backup" "/backup" "ext4" "$NOEXEC"
   mount_lv "docker" "/var/lib/docker"
-  mount_lv "cert" "/var/lib/dtebx"
-  mount_lv "log"    "/var/log"       "btrfs" "compress=zstd:6"
-  mount_lv "audit"  "/var/log/audit" "btrfs" "compress=zstd:6"
+  mount_lv "cert" "/var/lib/dtebx" "ext4" "$NOEXEC"
+  mount_lv "log"    "/var/log"       "btrfs" "compress=zstd:6,$NOEXEC"
+  mount_lv "audit"  "/var/log/audit" "btrfs" "compress=zstd:6,$NOEXEC"
 
   # アプリケーション用 (階層構造)
   # 親ディレクトリを先にマウント
-  mount_lv "currentApp" "/home/ot-admin/dfx_dtebx_docker"
+  mount_lv "currentApp" "/home/ot-admin/dfx_dtebx_docker" "ext4" "$NOEXEC"
   # 子ディレクトリ
   mount_lv "adm_ini"    "/home/ot-admin/dfx_dtebx_docker/adm_ini"
-  mount_lv "adm_clean"  "/home/ot-admin/dfx_dtebx_docker/adm_clean"
-  mount_lv "dbvol"      "/home/ot-admin/dfx_dtebx_docker/pgvol"
-  mount_lv "media"      "/home/ot-admin/dfx_dtebx_docker/media"
-  mount_lv "sfs"        "/home/ot-admin/dfx_dtebx_docker/sfs"
+  mount_lv "adm_clean"  "/home/ot-admin/dfx_dtebx_docker/adm_clean" "ext4" "$NOEXEC"
+  mount_lv "dbvol"      "/home/ot-admin/dfx_dtebx_docker/pgvol" "ext4" "$NOEXEC"
+  mount_lv "media"      "/home/ot-admin/dfx_dtebx_docker/media" "ext4" "$NOEXEC"
+  mount_lv "sfs"        "/home/ot-admin/dfx_dtebx_docker/sfs" "ext4" "$NOEXEC"
 
   /bin/udevadm settle
   /usr/bin/busybox sleep 2

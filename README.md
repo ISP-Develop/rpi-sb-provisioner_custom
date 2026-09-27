@@ -406,6 +406,19 @@ grep -n "DTEBX_VERITY_OVERLAY_MODULES" /usr/bin/rpi-sb-provisioner.sh
 
 反映確認は §3.5 と同じ。戻すときは `.bak.verity.*` を `/usr/bin/rpi-sb-provisioner.sh` に戻す。
 
+
+### 3.9 書ける LV を `noexec,nodev,nosuid` で mount する（2026-09-27・docs/42 §7／docs/43 項 4d・J-14・J-19）
+
+**何が変わるか**: `init_cryptroot.sh` の `mount_lv` で、p3 の LV のうち **`lv_docker`（コンテナ rootfs は exec 要＝層 C の一覧で守る）と
+`lv_adm_ini`（560-2 本体と自己更新を残す）以外の 9 本**に `noexec,nodev,nosuid` を付ける。当社ホストアプリの実行物は
+項 4c で OS イメージ（下層）に焼かれ、活性化の make は `dfx-lower-install` で一致を確かめるだけになったので、書ける LV に
+実行物は無い（adm2b・adm1b で 0 本を確認）。**先に 4c の pi-gen 像（`06-isp-apps/01-run.sh` が焼く）を入れてから**この
+initramfs を入れること。順序を逆にすると活性化の make が下層に無い実行物を LV に置けず止まる。
+
+反映は §3.8 の ② と同じ（initramfs の再パック・差し替え）。判定: 起動後 `findmnt -no TARGET,OPTIONS /home/ot-admin/dfx_dtebx_docker`
+に `noexec` が在り、`/var/lib/docker` と `…/adm_ini` には無い。ホット確認（remount で 9 本に当てて service 再起動・cron・
+docker exec・postgres・3c が通ること）は adm2b で 2026-09-27 に済ませてある（docs/43 §6-20）。
+
 ### 3.6 再プロビジョニング時の注意
 
 - セキュアブート設定済みの端末は EEPROM と boot.img の署名不一致で失敗しやすい → `/etc/rpi-sb-provisioner/special-reprovision-device/<シリアル下8桁>` を touch する。
