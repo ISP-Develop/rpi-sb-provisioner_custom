@@ -133,8 +133,40 @@ TARGET_GIB=6
 TARGET_P2_SIZE=$((TARGET_GIB * 2097152))
 TARGET_P2_END="${TARGET_P2_SIZE}s"
 TARGET_P3_START="$((TARGET_P2_SIZE + 1))s"
-if [ "$PART_SIZE" -gt $((TARGET_P2_SIZE + 2048)) ]; then
-  # 初回起動: ext4 を最小まで縮小してから p2 を 6GiB に切り、p3 を作る
+##### 本流（docs/42 §6-1 / docs/43 項 7e・2026-09-27）: prov が pi-gen 固定の下層と hash 木を焼いた機体 #####
+# prov は hash 木を 6GiB-64MiB（=TARGET_P2_SIZE - DTEBX_HASH_SECTORS）に置く。初回起動でそこに verity 超ブロックが
+# 在れば「本流」＝**下層には一切触らない**（e2fsck/resize2fs を掛けると hash が壊れる）。p2/p3 の切り出しだけ行う。
+DTEBX_MAINLINE=0
+MAIN_HASH_START=""
+# 位置は署名済み initramfs の /etc/dtebx/verity.layout（prov が sidecar の manifest から同梱）が正本。
+# 無ければ本流ではない（r2 経路）。★cryptroot の大きさから逆算しない（2026-09-27: 「6GiB−64MiB」の決め打ちで外した）。
+if [ -s /etc/dtebx/verity.layout ]; then
+  MAIN_HASH_START=$(/usr/bin/busybox sed -n 's/^hash_sector=//p' /etc/dtebx/verity.layout)
+  LAYOUT_HASH_SECTORS=$(/usr/bin/busybox sed -n 's/^hash_sectors=//p' /etc/dtebx/verity.layout)
+  [ -n "$LAYOUT_HASH_SECTORS" ] && DTEBX_HASH_SECTORS="$LAYOUT_HASH_SECTORS"
+fi
+if [ -n "$MAIN_HASH_START" ] && /sbin/dmsetup create dtebx_probe --noudevsync --table "0 ${DTEBX_HASH_SECTORS} linear /dev/mapper/cryptroot ${MAIN_HASH_START}" 2>/dev/null; then
+  if [ ! -e /dev/mapper/dtebx_probe ]; then
+    mm=$(/sbin/dmsetup info -c --noheadings -o major,minor dtebx_probe 2>/dev/null)
+    [ -n "$mm" ] && /usr/bin/busybox mknod /dev/mapper/dtebx_probe b "${mm%:*}" "${mm#*:}"
+  fi
+  if /sbin/veritysetup dump /dev/mapper/dtebx_probe >/dev/null 2>&1; then DTEBX_MAINLINE=1; fi
+  /sbin/dmsetup remove dtebx_probe 2>/dev/null
+fi
+echo "verity: mainline(prov-fixed lower)=${DTEBX_MAINLINE}"
+
+if [ "$PART_SIZE" -gt $((TARGET_P2_SIZE + 2048)) ] && [ "$DTEBX_MAINLINE" = 1 ]; then
+  # 本流の初回起動: 下層に触らず p2 を 6GiB に切って p3 を作るだけ
+  echo "Creating physical partition wall with parted (mainline: lower untouched)..."
+  yes | /usr/bin/setarch --uname-2.6 /sbin/parted /dev/mmcblk0 ---pretend-input-tty resizepart 2 ${TARGET_P2_END}
+  /usr/bin/setarch --uname-2.6 /sbin/parted -s /dev/mmcblk0 mkpart primary ${TARGET_P3_START} 100%
+  /usr/bin/cryptkey-fetch | /sbin/cryptsetup resize cryptroot
+  /usr/bin/setarch --uname-2.6 /sbin/partprobe /dev/mmcblk0 || true
+  /usr/bin/busybox mdev -s || true
+  /bin/udevadm settle || true
+  /usr/bin/busybox sleep 2
+elif [ "$PART_SIZE" -gt $((TARGET_P2_SIZE + 2048)) ]; then
+  # 初回起動(r2・機体で hash を作る形): ext4 を最小まで縮小してから p2 を 6GiB に切り、p3 を作る
   /sbin/e2fsck -y -f /dev/mapper/cryptroot || true
   echo "Starting resize2fs -M (shrink to minimum; verity lower)..."
   # 2 回掛ける: 1 回目で inode テーブル等が減り、2 回目でさらに縮む(縮まなければ Nothing to do)
@@ -171,8 +203,14 @@ dtebx_dm_create() {
 }
 dtebx_carve() {
   CRYPT_SECTORS=$(/usr/bin/busybox blockdev --getsz /dev/mapper/cryptroot) || return 1
-  HASH_START=$(( (CRYPT_SECTORS - DTEBX_HASH_SECTORS) / 8 * 8 ))
-  [ "$HASH_START" -gt 0 ] || return 1
+  if [ "$DTEBX_MAINLINE" = 1 ]; then
+    # 本流: [ lower | hash @MAIN_HASH_START | upper（残り）]
+    HASH_START="$MAIN_HASH_START"
+  else
+    # r2（機体で hash を作る形）: [ lower | upper | hash（末尾 64MiB）]
+    HASH_START=$(( (CRYPT_SECTORS - DTEBX_HASH_SECTORS) / 8 * 8 ))
+  fi
+  [ "$HASH_START" -gt 0 ] && [ $((HASH_START + DTEBX_HASH_SECTORS)) -le "$CRYPT_SECTORS" ] || return 1
   dtebx_dm_create dtebx_hash "0 ${DTEBX_HASH_SECTORS} linear /dev/mapper/cryptroot ${HASH_START}" || return 1
   FORMAT_NEEDED=0
   if /sbin/veritysetup dump /dev/mapper/dtebx_hash > /tmp/verity_dump.out 2>&1; then
@@ -185,11 +223,18 @@ dtebx_carve() {
   fi
   [ -n "$DATA_BLOCKS" ] && [ "$DATA_BLOCKS" -gt 0 ] || return 1
   LOWER_SECTORS=$((DATA_BLOCKS * 8))
-  UPPER_SECTORS=$((HASH_START - LOWER_SECTORS))
+  if [ "$DTEBX_MAINLINE" = 1 ]; then
+    [ "$LOWER_SECTORS" -le "$HASH_START" ] || { echo "verity: lower (${LOWER_SECTORS}) overlaps hash @${HASH_START}"; return 1; }
+    UPPER_START=$((HASH_START + DTEBX_HASH_SECTORS))
+    UPPER_SECTORS=$((CRYPT_SECTORS - UPPER_START))
+  else
+    UPPER_START=$LOWER_SECTORS
+    UPPER_SECTORS=$((HASH_START - LOWER_SECTORS))
+  fi
   [ "$UPPER_SECTORS" -gt 262144 ] || { echo "verity: upper too small (${UPPER_SECTORS} sectors)"; return 1; }
   dtebx_dm_create dtebx_lower "0 ${LOWER_SECTORS} linear /dev/mapper/cryptroot 0" || return 1
-  dtebx_dm_create dtebx_upper "0 ${UPPER_SECTORS} linear /dev/mapper/cryptroot ${LOWER_SECTORS}" || return 1
-  echo "verity: layout lower=0..${LOWER_SECTORS} upper=${LOWER_SECTORS}..${HASH_START} hash=${HASH_START}..$((HASH_START + DTEBX_HASH_SECTORS)) (sectors)"
+  dtebx_dm_create dtebx_upper "0 ${UPPER_SECTORS} linear /dev/mapper/cryptroot ${UPPER_START}" || return 1
+  echo "verity: layout lower=0..${LOWER_SECTORS} hash=${HASH_START}..$((HASH_START + DTEBX_HASH_SECTORS)) upper=${UPPER_START}..$((UPPER_START + UPPER_SECTORS)) (sectors, mainline=${DTEBX_MAINLINE})"
   if [ "$FORMAT_NEEDED" = 1 ]; then
     # 1 回きり: 下層を clean にしてから format。以後、下層には一切書かない。
     echo "verity: formatting hash tree (one-time)"
@@ -210,6 +255,11 @@ dtebx_carve() {
       /usr/bin/busybox sync
       /usr/bin/busybox umount /p1
     fi
+  fi
+  # 本流の初回起動: 上層はまだ空（prov は下層と hash 木だけ書く）→ ここで 1 回だけ mkfs
+  if [ -z "$(/sbin/blkid -o value -s TYPE /dev/mapper/dtebx_upper 2>/dev/null)" ]; then
+    echo "verity: upper has no filesystem -> mke2fs (one-time)"
+    /sbin/mke2fs -t ext4 -L UPPER -F /dev/mapper/dtebx_upper || return 1
   fi
   return 0
 }

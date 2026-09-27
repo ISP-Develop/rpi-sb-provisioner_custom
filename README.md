@@ -410,3 +410,52 @@ grep -n "DTEBX_VERITY_OVERLAY_MODULES" /usr/bin/rpi-sb-provisioner.sh
 
 - セキュアブート設定済みの端末は EEPROM と boot.img の署名不一致で失敗しやすい → `/etc/rpi-sb-provisioner/special-reprovision-device/<シリアル下8桁>` を touch する。
 - `GOLD_MASTER_OS_FILE` は `/etc/rpi-sb-provisioner/config` の**単一のグローバル値**で、**どのイメージを使ったかはログに残らない**。ADM1/ADM2 を続けて書くときは run の間に書き換えること。
+
+### 3.8 dm-verity 本流 — pi-gen 固定の下層・hash 木を焼き、root.hash を initramfs に同梱する（2026-09-27・docs/42 §6-1／docs/43 項 7e）
+
+**何が変わるか**: 従来 prov は rootfs を `mke2fs -d` で作り直していた（機体ごとに UUID・hash_seed が変わり、
+機体で hash を作る r2 形になっていた）。本流では pi-gen の `export-image/06-dfx-verity` が作った
+sidecar（`<GOLD_MASTER_OS_FILE>.verity/`＝`lower.ext4.zst`・`hash.img`・`root.hash`・`manifest`）を
+**そのまま**書き、root.hash を署名済み initramfs（`/etc/dtebx/root.hash`）に入れる。
+∴ 全機体で下層・root hash・boot.img が同じになる。sidecar が無ければ従来（r2）どおり動く。
+
+| 場所 | 変更 | 正本 |
+|---|---|---|
+| prov `/usr/bin/rpi-sb-provisioner.sh` | `augment_initramfs()` 末尾で root.hash を同梱／`prepare_rootfs_image()` に sidecar 分岐（`truncate`→下層 `dd conv=sparse`→sha 突合→hash 木を `hash_offset` へ→`img2simg`。★イメージは下層＋hash 木の大きさだけ・`-s` 無し＝穴（DONT_CARE）を作らない。cryptroot 全域にすると末尾 54GiB の DONT_CARE を機体の fastbootd が拒む＝2026-09-27 実測） | `host-support/rpi-sb-provisioner.sh`（**prov の現物と同一にしておく＝J-9**。差し替えは下の手順） |
+| initramfs `usr/bin/init_cryptroot.sh` | 起動時に `6GiB-64MiB` の verity 超ブロックを探し、在れば**本流**＝下層に触らず（e2fsck/resize2fs を掛けない）p2/p3 を切るだけ。`dtebx_carve` は hash 木から下層サイズを復元し、上層に FS が無ければ 1 回だけ `mke2fs`。`/etc/dtebx/root.hash` が在れば `veritysetup open` | `work/extract_initramfs/usr/bin/init_cryptroot.sh` |
+| pi-gen | `export-image/06-dfx-verity/`（05-finalise の後。下層＝p2 を最小化＋1GiB、salt/uuid/時刻固定で再現性あり） | `rpi-deploy/pi-gen` |
+
+**prov への反映手順（sudo が要る。開発機 `~/rpi-sb-provisioner_custom` から）**
+
+```bash
+# ① スクリプト（退避→構文検査→差し替え）
+scp host-support/rpi-sb-provisioner.sh prov:/tmp/rpi-sb-provisioner.sh.new
+ssh prov 'D=$(date +%Y%m%d%H%M%S); sudo cp -p /usr/bin/rpi-sb-provisioner.sh /usr/bin/rpi-sb-provisioner.sh.bak.$D \
+  && bash -n /tmp/rpi-sb-provisioner.sh.new && sudo install -m 755 -o root -g root /tmp/rpi-sb-provisioner.sh.new /usr/bin/rpi-sb-provisioner.sh'
+# ② initramfs（木を prov で root 所有にして再パック→退避→差し替え）
+#    ⚠ 2 回目以降は prov 側の木が root 所有で rsync が書けないので先に消す
+ssh prov 'sudo rm -rf /tmp/extract_initramfs'
+rsync -a --delete work/extract_initramfs/ prov:/tmp/extract_initramfs/
+ssh prov 'D=$(date +%Y%m%d%H%M%S); cd /tmp/extract_initramfs && sudo chown -R root:root . \
+  && sudo sh -c "find . -print0 | cpio --null -o --format=newc 2>/dev/null | zstd -q -z -19 -T0 -f -o /tmp/cryptroot_initramfs.new" \
+  && sudo cp -p /var/lib/rpi-sb-provisioner/cryptroot_initramfs /var/lib/rpi-sb-provisioner/cryptroot_initramfs.bak.$D \
+  && sudo install -m 644 -o ot-admin -g ot-admin /tmp/cryptroot_initramfs.new /var/lib/rpi-sb-provisioner/cryptroot_initramfs \
+  && zstd -d -c /var/lib/rpi-sb-provisioner/cryptroot_initramfs | cpio -i --to-stdout usr/bin/init_cryptroot.sh 2>/dev/null | grep -c DTEBX_MAINLINE'
+# ③ sidecar を GOLD_MASTER の隣へ（pi-gen の deploy/image_<日付>-DTEBX-ADM-RSP-lite.img.verity/ を丸ごと。既存は消してから）
+#    例: ssh prov 'sudo rm -rf /srv/rpi-sb-provisioner/images/image_2026-09-27-DTEBX-ADM-RSP-lite.img.verity && sudo cp -r ~/image_2026-09-27-DTEBX-ADM-RSP-lite.img.verity /srv/rpi-sb-provisioner/images/'
+```
+
+**レイアウトと 2026-09-27 の失敗（同じ轍を踏まないため）**
+- cryptroot = `[ lower | hash 木（下層の直後・manifest の hash_offset）| upper（残り。初回起動で mkfs）]`。位置は sidecar の
+  `manifest`（`hash_sector`）が正本で、prov がそれを initramfs の `/etc/dtebx/verity.layout` に同梱し、initramfs はそれを読んで
+  probe する。**cryptroot の大きさから逆算しない**——初版は「6GiB−64MiB」と決め打ちしたが、cryptroot は p2 先頭（520MiB）と
+  LUKS ヘッダ（16MiB）を引いた 11485185 セクタ（5.47GiB）で、hash 木が外に落ちて本流に入らなかった。
+- 下層の書込みに **`dd conv=sparse` を使わない**。ファイル内の全ゼロブロック（ファーム・.so の 0 埋め）が穴になり、
+  `img2simg -s` がそこを「書かない（don't care）」にする。dm-crypt 越しでは書かれなかったセクタは**前の暗号文＝ゴミ**として
+  読める（実測: `dpkg -V` で両系 35〜43 ファイルが内容不一致、壊れたファイルは機体ごとに違う）。上層領域の穴だけ don't care でよい。
+
+**焼いた後の判定**（docs/43 項 7e 完了条件）: `dmsetup table` に `dtebx_rootro … verity` が在り、その root hash が
+sidecar の `root.hash` と一致／`/boot/firmware/ROOTHASH.TXT` が**無い**（機体で hash を作っていない）／
+両系で root hash が同じ／下層 1 ブロック改ざんで I/O エラー（REPORT-20260925 §2 の再現）。
+⚠ 本流の初回起動が失敗したときの落ち方: 本流検出に失敗すると r2 経路（`resize2fs -M` で下層を触る）に入り
+hash が壊れ `veritysetup open` が失敗 → 「plain lower」（verity 無しの overlay）で起動する＝文鎮にはならない。
