@@ -543,10 +543,49 @@ augment_initramfs() {
         log "dm-verity: no sidecar ${GOLD_MASTER_OS_FILE}.verity/root.hash -> first-boot hashing mode (r2)"
     fi
 
-    find . -print0 | cpio --null -ov --format=newc > ../initramfs.cpio
+    # DEFORION 7e-β（docs/43 項 7e）: initramfs を決定的に詰める。全機体で同じ boot.img にするため、
+    #   mtime を GOLD_MASTER の mtime に揃え、並びを固定し、cpio の inode/dev/nlink を落とす（--reproducible）。
+    #   zstd は同じ入力・同じ level なら同じ出力。
+    dfx_epoch="$(dfx_source_date_epoch)"
+    find . -exec touch -h -d "@${dfx_epoch}" {} +
+    find . -print0 | LC_ALL=C sort -z | cpio --null -o --format=newc --reproducible > ../initramfs.cpio
     cd "${TMP_DIR}"
     rm -rf "${TMP_DIR}"/initramfs
     zstd --no-progress --rm -f -6 "${TMP_DIR}"/initramfs.cpio -o "${initramfs_compressed_file}"
+}
+
+# DEFORION 7e-β: 決定的パックに使う時刻（GOLD_MASTER の mtime。prov 上で全機体に共通）
+dfx_source_date_epoch() {
+    stat -c %Y "${GOLD_MASTER_OS_FILE}"
+}
+
+# DEFORION 7e-β: FAT のボリューム ID を固定する（mkfs.fat は時刻＋usec から作るので毎回違う。ROM/firmware は見ない）。
+#   FAT16 は boot sector の 39..42、FAT32 は 67..70（種別は 54..61／82..89 の "FAT16   "/"FAT32   " で判定）。
+dfx_fix_fat_volume_id() {
+    img="$1"; epoch="$2"
+    volid="$(printf '%08x' "${epoch}")"
+    if dd if="${img}" bs=1 skip=82 count=8 2>/dev/null | grep -q 'FAT32'; then
+        off=67
+        # FAT32 はバックアップブートセクタ（boot sector の 50..51 にセクタ番号。通常 6）にも同じ ID が在る
+        bkp="$(dd if="${img}" bs=1 skip=50 count=2 2>/dev/null | od -An -tu2 | tr -d ' ')"
+    elif dd if="${img}" bs=1 skip=54 count=8 2>/dev/null | grep -q 'FAT1'; then off=39; bkp=0
+    else log "7e-β: unknown FAT type in ${img}; volume id left as is"; return 0; fi
+    printf "\\x${volid:6:2}\\x${volid:4:2}\\x${volid:2:2}\\x${volid:0:2}" | dd of="${img}" bs=1 seek="${off}" count=4 conv=notrunc 2>/dev/null
+    if [ "${bkp}" != 0 ]; then
+        printf "\\x${volid:6:2}\\x${volid:4:2}\\x${volid:2:2}\\x${volid:0:2}" | dd of="${img}" bs=1 seek="$((bkp * 512 + off))" count=4 conv=notrunc 2>/dev/null
+    fi
+    # ボリュームラベル "BOOT" の dir entry（属性 0x08）の時刻は mkfs.fat 4.2 が SOURCE_DATE_EPOCH を無視して現在時刻を書く
+    # （2026-09-28 prov で実測）。epoch から DOS 日時を作って ctime/cdate/adate/mtime/mdate を固定する。
+    lbl="$(grep -obUaP 'BOOT {7}\x08' "${img}" | head -1 | cut -d: -f1)"
+    if [ -n "${lbl}" ]; then
+        # shellcheck disable=SC2046
+        set -- $(date -u -d "@${epoch}" '+%Y %m %d %H %M %S')
+        ddate=$(( ((10#$1 - 1980) << 9) | (10#$2 << 5) | 10#$3 ))
+        dtime=$(( (10#$4 << 11) | (10#$5 << 5) | (10#$6 / 2) ))
+        le16() { printf "\\x$(printf '%02x' $(( $1 & 255 )))\\x$(printf '%02x' $(( ($1 >> 8) & 255 )))"; }
+        { printf '\0'; le16 "${dtime}"; le16 "${ddate}"; le16 "${ddate}"; } | dd of="${img}" bs=1 seek="$((lbl + 13))" count=7 conv=notrunc 2>/dev/null
+        { le16 "${dtime}"; le16 "${ddate}"; } | dd of="${img}" bs=1 seek="$((lbl + 22))" count=4 conv=notrunc 2>/dev/null
+    fi
 }
 
 prepare_pre_boot_auth_images() {
@@ -635,9 +674,16 @@ prepare_pre_boot_auth_images() {
         run_customisation_script "sb-provisioner" "rootfs-mounted" "${TMP_DIR}/rpi-boot-img-mount" "${TMP_DIR}/rpi-rootfs-img-mount"
 
         announce_start "boot.img creation"
+        # DEFORION 7e-β: bootfs の全ファイルの mtime を GOLD_MASTER の mtime に揃え（編集した cmdline/config と新しい initramfs8 も）、
+        #   mkfs.fat のラベル時刻は SOURCE_DATE_EPOCH で固定、ボリューム ID は作成後に固定 → 全機体で同じ boot.img（同じ sha256）。
+        dfx_epoch="$(dfx_source_date_epoch)"
+        find "${TMP_DIR}"/rpi-boot-img-mount -exec touch -h -d "@${dfx_epoch}" {} + 2>/dev/null || true
+        export SOURCE_DATE_EPOCH="${dfx_epoch}"
         cp "$(get_fastboot_config_file)" "${TMP_DIR}"/config.txt
 
         rpi-make-boot-image -b "pi${RPI_DEVICE_FAMILY}" -a 64 -d "${TMP_DIR}"/rpi-boot-img-mount -o "${TMP_DIR}"/boot.img
+        dfx_fix_fat_volume_id "${TMP_DIR}"/boot.img "${dfx_epoch}"
+        log "7e-β: boot.img sha256 $(sha256sum "${TMP_DIR}"/boot.img | cut -c1-16)… (epoch ${dfx_epoch}; should be identical on every unit provisioned from this image)"
         announce_stop "boot.img creation"
 
         announce_start "boot.img signing"

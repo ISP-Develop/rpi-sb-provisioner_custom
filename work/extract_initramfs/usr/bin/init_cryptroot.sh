@@ -591,9 +591,10 @@ if derive_p3_key > /dev/null 2>&1; then
             recovery_log "[WARN] No archive(encrypted) found for $pattern"
             exit 1
           fi
-          # 署名検証・復号を実行
+          # 署名検証・復号を実行（C-412: 本体鍵は DEK＋この機体の TPM に封印した内部バックアップ用マスタ鍵。
+          #   開封した平文を --kek-file で渡す。開封できない＝この TPM のスナップショットではない→通さない）
           /usr/bin/adm-diag-svd_arm64 --mode verify \
-            -t "$target_file" -o "$STAGING"
+            -t "$target_file" -o "$STAGING" --kek-file "$KEK_FILE"
           decrypted_gz=$(ls "$STAGING"/${pattern}_[0-9]*.tar.gz 2>/dev/null | head -n 1)
           if [ -z "$decrypted_gz" ]; then
             recovery_log "[WARN] No archive(decrypted) found for $pattern"
@@ -638,6 +639,42 @@ if derive_p3_key > /dev/null 2>&1; then
           return 0
         }
 
+        # C-412（deforion docs/40 §2-3）: p7m を開く前に、この機体の TPM で内部バックアップ用マスタ鍵を開封する。
+        #   封印物は lv_cert の③共有区画（/mnt/var/lib/dtebx/shared/internal_backup_master_key/）。initramfs は復元前に
+        #   lv_cert を mount 済み。平文は initramfs の tmpfs（$KEK_WORK）にだけ置き、Phase 2 の後（失敗時も）で shred する。
+        KEK_WORK="/run/c412-kek"
+        KEK_FILE="$KEK_WORK/internal_backup_master_key"
+        unseal_internal_master_key() {
+          _kdir="/mnt/var/lib/dtebx/shared/internal_backup_master_key"
+          if [ ! -f "$_kdir/internal_backup_master_key.blob" ]; then
+            recovery_log "[WARN] internal backup master key blob is missing ($_kdir); the bundle cannot be opened on this device"
+            return 1
+          fi
+          _i=0
+          while [ ! -e /dev/tpmrm0 ] && [ ! -e /dev/tpm0 ] && [ $_i -lt 10 ]; do /usr/bin/busybox sleep 1; _i=$((_i+1)); done
+          _tpm=/dev/tpmrm0; [ -e "$_tpm" ] || _tpm=/dev/tpm0
+          [ -e "$_tpm" ] || { recovery_log "[WARN] no TPM device for unsealing the master key"; return 1; }
+          /usr/bin/busybox rm -rf "$KEK_WORK"; /usr/bin/busybox mkdir -p "$KEK_WORK"; /usr/bin/busybox chmod 700 "$KEK_WORK"
+          printf '[system]\nloglevel = "info"\nlogFile = "./dtebx_unseal_file.log"\n' > "$KEK_WORK/584-sub_Dtebx_unseal_file.ini"
+          if ! ( cd "$KEK_WORK" && /usr/bin/dtebx_unseal_file -t "$_tpm" -s "$_kdir" -o "$KEK_WORK" -i internal_backup_master_key -f file >"$KEK_WORK/unseal.out" 2>&1 ); then
+            recovery_log "[WARN] failed to unseal the internal backup master key: $(/usr/bin/busybox tail -n 2 "$KEK_WORK/unseal.out" 2>/dev/null | tr '\n' ' ')"
+            return 1
+          fi
+          [ -s "$KEK_FILE" ] || { recovery_log "[WARN] unsealed master key is empty"; return 1; }
+          recovery_log "internal backup master key unsealed (TPM $_tpm)"
+          return 0
+        }
+        shred_internal_master_key() {
+          [ -d "$KEK_WORK" ] || return 0
+          /usr/bin/shred -u "$KEK_FILE" 2>/dev/null || /usr/bin/busybox rm -f "$KEK_FILE"
+          /usr/bin/busybox rm -rf "$KEK_WORK"
+        }
+        if ! unseal_internal_master_key; then
+          erase_record "failed-verification"
+          recovery_failed_log "Could not unseal this device's internal backup master key; the bundle will not be opened."
+          [ -f "$TARGET_LIST" ] && mv "$TARGET_LIST" "${TARGET_LIST}.failed"
+          exit 1
+        fi
         recovery_log "Phase 1: Running integrity check on all components..."
         if restore_lv_tar "boot" "/boot/firmware" "verify" && \
             restore_lv_tar "log" "/var/log" "verify" && \
@@ -680,9 +717,10 @@ if derive_p3_key > /dev/null 2>&1; then
           recovery_log "Merging Certificates..."
           mkdir -p "$STAGING/cert"
           target_file=$(ls "$STAGING"/cert_[0-9]*.tar.gz.p7m 2>/dev/null | head -n 1)
-          # 署名検証・復号を実行
+          # 署名検証・復号を実行（C-412: 本体鍵は DEK＋この機体の TPM に封印した内部バックアップ用マスタ鍵。
+          #   開封した平文を --kek-file で渡す。開封できない＝この TPM のスナップショットではない→通さない）
           /usr/bin/adm-diag-svd_arm64 --mode verify \
-            -t "$target_file" -o "$STAGING"
+            -t "$target_file" -o "$STAGING" --kek-file "$KEK_FILE"
           /usr/bin/busybox rm -f "$target_file"
           target_file=$(ls "$STAGING"/cert_[0-9]*.tar.gz 2>/dev/null | head -n 1)
           LIST_FILE="/mnt/var/lib/dtebx/intermediate_target.txt"
@@ -740,6 +778,7 @@ if derive_p3_key > /dev/null 2>&1; then
           # 復元していないのに書くと、戻っていない構成で再ビルドが走る。∴ 成功時だけ書く。
           echo "$BACKUP_FILE" > /mnt/var/lib/dtebx/needs_recovery
           erase_record "completed"
+          shred_internal_master_key
           recovery_log "Recovery successful. Rebooting in 5 seconds..."
           cp "$RECOVERY_LOG" "/mnt/var/log/recovery_$BACKUP_FILE.log"
           sleep 5
@@ -749,6 +788,7 @@ if derive_p3_key > /dev/null 2>&1; then
         # 「表示が出ない」を「失敗」と読み替えられるよう、結果を独立ゾーンに明示して残す。
         # 指示ファイルは .failed へ退避する(そのまま残すと毎ブート同じ壊れたバンドルで再試行する)。
         erase_record "failed-verification"
+          shred_internal_master_key
         recovery_failed_log "Restore was not performed. Booting the existing OS."
         # ⚠ `[ -f x ] && mv` をブロック末尾に置くと、条件が偽のとき set -e でサブシェルごと
         #    落ち、外側ハンドラが結果を "failed" で上書きしてしまう。if で書く。
@@ -773,6 +813,7 @@ if derive_p3_key > /dev/null 2>&1; then
     ##### RECOVERY LOGIC END #####
   ) || {
     # サブシェルが1（エラー）で終了した場合の処理
+    /usr/bin/busybox rm -rf /run/c412-kek 2>/dev/null
     # 復元の途中(in-progress)で落ちていれば「一部だけ書き換わった」状態なので、
     # 失敗ではなく partial として残す。ここを区別しないと、運用側は「消えたのか
     # 中途半端なのか」を判断できない。

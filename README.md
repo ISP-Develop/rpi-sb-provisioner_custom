@@ -419,6 +419,30 @@ initramfs を入れること。順序を逆にすると活性化の make が下�
 に `noexec` が在り、`/var/lib/docker` と `…/adm_ini` には無い。ホット確認（remount で 9 本に当てて service 再起動・cron・
 docker exec・postgres・3c が通ること）は adm2b で 2026-09-27 に済ませてある（docs/43 §6-20）。
 
+
+### 3.10 boot.img の決定的パック（2026-09-28・docs/43 項 7e-β）
+
+**何が変わるか**: 同じ像から焼いた機体で `boot.img` の sha256 が違っていた（initramfs の再パックで cpio の mtime/inode が、
+FAT でボリューム ID とラベルの時刻が毎回変わる。中身のファイルは全機体で同一＝実測）。`rpi-sb-provisioner.sh` で
+①initramfs は `touch -d @<GOLD_MASTER の mtime>`＋`LC_ALL=C sort`＋`cpio --reproducible`、②bootfs の全ファイルも同じ mtime に揃え
+`SOURCE_DATE_EPOCH` を渡して `rpi-make-boot-image`、③作成後に FAT のボリューム ID（主＋バックアップブートセクタ）と
+ラベル "BOOT" の dir entry の時刻を epoch 由来の固定値に書き直す（`dfx_fix_fat_volume_id`。dosfstools 4.2 は
+`SOURCE_DATE_EPOCH` をラベル時刻に効かせない＝実測）。prov で同じ bootfs から 2 回作って sha256 一致・`fsck.fat` 正常を確認済み。
+ログに `7e-β: boot.img sha256 …` を出すので、機体ごとに同じ値になることを provisioner.log で確かめる。
+
+反映は §3.8 の ①（`/usr/bin/rpi-sb-provisioner.sh` の差し替え）だけ。
+
+
+### 3.11 工場スナップショット（p7m）の鍵階層化（2026-09-28・C-412／docs/40・docs/43 項 7c）
+
+**何が変わるか**: p7m の本体鍵が固定値から「DEK＋その機体の TPM に封印した `internal_backup_master_key`」になった。
+initramfs は Phase 1 の前に `dtebx_unseal_file` で鍵を開封（`/mnt/var/lib/dtebx/shared/internal_backup_master_key/`）し、
+`adm-diag-svd_arm64 --mode verify … --kek-file` に渡す。開封できなければ `failed-verification` で既存 OS を起動する。
+`usr/bin/` に **`dtebx_unseal_file`（静的）を追加**、`adm-diag-svd_arm64` は新版（`DTBXSVD2`。旧 `DTBXSVD1` は拒む）。
+
+反映は §3.8 ②（initramfs の再パック・差し替え）。⚠ **sign 側（560-4／560-2＝活性化。pi-gen 像と prov AppMaster の adm-ini）と同時に入れ、
+クリーンインストールでバンドルを作り直す**。片方だけだと消去が必ず失敗する。
+
 ### 3.6 再プロビジョニング時の注意
 
 - セキュアブート設定済みの端末は EEPROM と boot.img の署名不一致で失敗しやすい → `/etc/rpi-sb-provisioner/special-reprovision-device/<シリアル下8桁>` を touch する。
