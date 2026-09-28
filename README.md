@@ -430,6 +430,12 @@ FAT でボリューム ID とラベルの時刻が毎回変わる。中身のフ
 `SOURCE_DATE_EPOCH` をラベル時刻に効かせない＝実測）。prov で同じ bootfs から 2 回作って sha256 一致・`fsck.fat` 正常を確認済み。
 ログに `7e-β: boot.img sha256 …` を出すので、機体ごとに同じ値になることを provisioner.log で確かめる。
 
+⚠ **このスクリプトは `#!/bin/sh`＝prov では dash で動く。** 初版の `dfx_fix_fat_volume_id` は bash 固有の書き方
+（`${v:6:2}`・`$(( 10#09 ))`・`printf '\x..'`）を使っていたため、2026-09-28 の焼き込みで `Bad substitution` →
+`set -e` で boot.img 作成の直後に落ちた（provisioner.log 12:5x）。POSIX sh に書き直し（8 進エスケープの `dfx_byte`/`dfx_le16`、
+`date '+%-m'` で先頭 0 を出さない）、prov の dash で同じ bootfs から 2 回作って sha256 一致・volume id と label 時刻の
+書き込み・`fsck.fat` 正常を確認した。§3.8 ① の差し替え前検査は `sh -n` と `bash -n` の両方を通す。
+
 反映は §3.8 の ①（`/usr/bin/rpi-sb-provisioner.sh` の差し替え）だけ。
 
 
@@ -468,7 +474,7 @@ sidecar（`<GOLD_MASTER_OS_FILE>.verity/`＝`lower.ext4.zst`・`hash.img`・`roo
 # ① スクリプト（退避→構文検査→差し替え）
 scp host-support/rpi-sb-provisioner.sh prov:/tmp/rpi-sb-provisioner.sh.new
 ssh prov 'D=$(date +%Y%m%d%H%M%S); sudo cp -p /usr/bin/rpi-sb-provisioner.sh /usr/bin/rpi-sb-provisioner.sh.bak.$D \
-  && bash -n /tmp/rpi-sb-provisioner.sh.new && sudo install -m 755 -o root -g root /tmp/rpi-sb-provisioner.sh.new /usr/bin/rpi-sb-provisioner.sh'
+  && sh -n /tmp/rpi-sb-provisioner.sh.new && bash -n /tmp/rpi-sb-provisioner.sh.new && sudo install -m 755 -o root -g root /tmp/rpi-sb-provisioner.sh.new /usr/bin/rpi-sb-provisioner.sh'
 # ② initramfs（木を prov で root 所有にして再パック→退避→差し替え）
 #    ⚠ 2 回目以降は prov 側の木が root 所有で rsync が書けないので先に消す
 ssh prov 'sudo rm -rf /tmp/extract_initramfs'

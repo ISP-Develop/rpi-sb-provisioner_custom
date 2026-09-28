@@ -561,30 +561,38 @@ dfx_source_date_epoch() {
 
 # DEFORION 7e-β: FAT のボリューム ID を固定する（mkfs.fat は時刻＋usec から作るので毎回違う。ROM/firmware は見ない）。
 #   FAT16 は boot sector の 39..42、FAT32 は 67..70（種別は 54..61／82..89 の "FAT16   "/"FAT32   " で判定）。
+# 1 バイト（10 進）を生で出す。dash の printf は \x を解さないので 8 進エスケープを使う
+dfx_byte() { printf "$(printf '\\%03o' "$1")"; }
+# 16 ビット値（10 進）をリトルエンディアン 2 バイトで出す
+dfx_le16() { dfx_byte $(( $1 & 255 )); dfx_byte $(( ($1 >> 8) & 255 )); }
+
 dfx_fix_fat_volume_id() {
+    # ★このスクリプトは sh（dash）で動く。bash 固有の書き方（${v:a:b}・10#・printf の \x）は使わない。
     img="$1"; epoch="$2"
-    volid="$(printf '%08x' "${epoch}")"
     if dd if="${img}" bs=1 skip=82 count=8 2>/dev/null | grep -q 'FAT32'; then
         off=67
         # FAT32 はバックアップブートセクタ（boot sector の 50..51 にセクタ番号。通常 6）にも同じ ID が在る
         bkp="$(dd if="${img}" bs=1 skip=50 count=2 2>/dev/null | od -An -tu2 | tr -d ' ')"
     elif dd if="${img}" bs=1 skip=54 count=8 2>/dev/null | grep -q 'FAT1'; then off=39; bkp=0
     else log "7e-β: unknown FAT type in ${img}; volume id left as is"; return 0; fi
-    printf "\\x${volid:6:2}\\x${volid:4:2}\\x${volid:2:2}\\x${volid:0:2}" | dd of="${img}" bs=1 seek="${off}" count=4 conv=notrunc 2>/dev/null
+    # volume id = epoch の下位 32 ビット、リトルエンディアン 4 バイト
+    v=$(( epoch & 0xffffffff ))
+    { dfx_le16 $(( v & 0xffff )); dfx_le16 $(( (v >> 16) & 0xffff )); } | dd of="${img}" bs=1 seek="${off}" count=4 conv=notrunc 2>/dev/null
     if [ "${bkp}" != 0 ]; then
-        printf "\\x${volid:6:2}\\x${volid:4:2}\\x${volid:2:2}\\x${volid:0:2}" | dd of="${img}" bs=1 seek="$((bkp * 512 + off))" count=4 conv=notrunc 2>/dev/null
+        { dfx_le16 $(( v & 0xffff )); dfx_le16 $(( (v >> 16) & 0xffff )); } | dd of="${img}" bs=1 seek="$((bkp * 512 + off))" count=4 conv=notrunc 2>/dev/null
     fi
     # ボリュームラベル "BOOT" の dir entry（属性 0x08）の時刻は mkfs.fat 4.2 が SOURCE_DATE_EPOCH を無視して現在時刻を書く
-    # （2026-09-28 prov で実測）。epoch から DOS 日時を作って ctime/cdate/adate/mtime/mdate を固定する。
+    # （2026-09-28 prov で実測）。epoch から DOS 日時を作って ctime_ms/ctime/cdate/adate/mtime/mdate を固定する。
     lbl="$(grep -obUaP 'BOOT {7}\x08' "${img}" | head -1 | cut -d: -f1)"
     if [ -n "${lbl}" ]; then
-        # shellcheck disable=SC2046
-        set -- $(date -u -d "@${epoch}" '+%Y %m %d %H %M %S')
-        ddate=$(( ((10#$1 - 1980) << 9) | (10#$2 << 5) | 10#$3 ))
-        dtime=$(( (10#$4 << 11) | (10#$5 << 5) | (10#$6 / 2) ))
-        le16() { printf "\\x$(printf '%02x' $(( $1 & 255 )))\\x$(printf '%02x' $(( ($1 >> 8) & 255 )))"; }
-        { printf '\0'; le16 "${dtime}"; le16 "${ddate}"; le16 "${ddate}"; } | dd of="${img}" bs=1 seek="$((lbl + 13))" count=7 conv=notrunc 2>/dev/null
-        { le16 "${dtime}"; le16 "${ddate}"; } | dd of="${img}" bs=1 seek="$((lbl + 22))" count=4 conv=notrunc 2>/dev/null
+        # %-m 等は先頭の 0 を付けない（dash の $(( )) は 08/09 を八進として拒む）
+        set -- $(date -u -d "@${epoch}" '+%Y %-m %-d %-H %-M %-S')
+        ddate=$(( (($1 - 1980) << 9) | ($2 << 5) | $3 ))
+        dtime=$(( ($4 << 11) | ($5 << 5) | ($6 / 2) ))
+        # +13: ctime_ms(1) ctime(2) cdate(2) adate(2)
+        { dfx_byte 0; dfx_le16 "${dtime}"; dfx_le16 "${ddate}"; dfx_le16 "${ddate}"; } | dd of="${img}" bs=1 seek="$((lbl + 13))" count=7 conv=notrunc 2>/dev/null
+        # +22: mtime(2) mdate(2)
+        { dfx_le16 "${dtime}"; dfx_le16 "${ddate}"; } | dd of="${img}" bs=1 seek="$((lbl + 22))" count=4 conv=notrunc 2>/dev/null
     fi
 }
 
