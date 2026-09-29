@@ -14,7 +14,7 @@ obj-*-gnu/
 # リパック成果物（§2）とその退避
 work/cryptroot_initramfs.new*
 work/extract_initramfs_bak/
-
+work-2.3.5/
 # §3.2 のパッチが prov 側で作り直すため管理しない
 work/extract_initramfs/usr/lib/modules/
 

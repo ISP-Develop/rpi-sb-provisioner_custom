@@ -5,7 +5,7 @@ DTEBX(ADM) 向けに **rpi-sb-provisioner の initramfs を改造し、プロビ
 ## このリポジトリの位置づけ（先に読むこと）
 
 - **ここは initramfs を作る場所であり、rpi-sb-provisioner が動く場所ではない。**
-- 実行環境は別ホスト（開発環境では prov = `192.168.128.111`）。udev → systemd `rpi-sb-*@.service` → `ExecStart=/usr/bin/rpi-sb-*.sh` という経路で、**実際に動くのは apt で入れたパッケージの `/usr/bin` 配下だけ**。このリポジトリのファイルが直接実行されることはない。
+- 実行環境は別ホスト。開発環境では **prov = `192.168.128.111`（rpi-sb-provisioner 2.0.4・§3。2 号機用）** と **prov2 = `192.168.128.112`（2.3.5・§4。1 号機用）** の 2 台。udev → systemd `rpi-sb-*@.service` → `ExecStart=/usr/bin/rpi-sb-*.sh` という経路で、**実際に動くのは apt で入れたパッケージの `/usr/bin` 配下だけ**。このリポジトリのファイルが直接実行されることはない。
 - したがって **上流ソース（`service/` 等）をここで編集しても実行環境には反映されない**。実行環境側のスクリプトに手を入れる必要がある場合は、ソースを抱えるのではなく **「§3 実行環境への反映」のパッチ手順として持つ**。
   - 2026-07-17 に fastboot 転送路の修正を `service/rpi-sb-common.sh` に対して行ったが、**配られる経路が無いため一度も反映されず**、2026-08-15 に書き込み先の取り違えとして表面化した（→ §3.3）。同じことを繰り返さないために `service/` 以下の上流ソースは本リポジトリから削除してある。
 
@@ -16,6 +16,9 @@ DTEBX(ADM) 向けに **rpi-sb-provisioner の initramfs を改造し、プロビ
 | `host-support/cryptroot_initramfs` | 上流の initramfs 原本。§1 の展開の**入力** |
 | `work/extract_initramfs/` | 展開して改造した initramfs ツリー（`usr/bin/init_cryptroot.sh` ほか）。**実質の成果物はここ** |
 | `work/cryptroot_initramfs.new*` | リパック結果。ビルド成果物のため git 管理外 |
+| `patches-2.3.5/` | 2.3.5 用のパッチ（§4）。`p4-1`・`p4-3` は prov2 の `/usr/bin` 向け、`p4-*_initramfs*.py` は initramfs 向け、`kernel_modules.list` は `/etc/rpi-sb-provisioner/` 向け |
+| `work-2.3.5/overlay/`・`work-2.3.5/MANIFEST` | 2.3.5 用 initramfs に**足す** 10 ファイルと、その由来・sha256（§4.3） |
+| `build-initramfs-2.3.5.sh` | 2.3.5 用 initramfs を「`work/extract_initramfs` の写し＋overlay＋パッチ」から組み立てる（§4.3） |
 
 上流リポジトリは `git clone git@github.com:raspberrypi/rpi-sb-provisioner.git`。原本の更新が必要になったときだけ参照する。
 
@@ -502,3 +505,120 @@ sidecar の `root.hash` と一致／`/boot/firmware/ROOTHASH.TXT` が**無い**�
 両系で root hash が同じ／下層 1 ブロック改ざんで I/O エラー（REPORT-20260925 §2 の再現）。
 ⚠ 本流の初回起動が失敗したときの落ち方: 本流検出に失敗すると r2 経路（`resize2fs -M` で下層を触る）に入り
 hash が壊れ `veritysetup open` が失敗 → 「plain lower」（verity 無しの overlay）で起動する＝文鎮にはならない。
+
+---
+
+## 4. rpi-sb-provisioner 2.3.5 用（prov2 = `192.168.128.112`・2026-09-29）
+
+§3（2.0.4・prov）とは**別の実行環境**である。prov2 は Debian 13 trixie の Raspberry Pi 5 で、上流 `v2.3.5`（9dcec25）を
+自前でビルドした deb を入れている（apt で入るのは非支援の 2.3.4 まで）。計画と経緯の正本はハブの
+`~/deforion/docs/assets/20260929_prov2_setup_plan.md`（P1〜P4 と §5「実行の記録」）。
+
+**§3 との関係**
+- **2 号機（adm1b・adm2b）は prov（2.0.4・§3）で継続する。1 号機（adm1・adm2）は prov2（2.3.5・§4）で書く**（2026-09-29 責任者裁定 J-6）。
+- 2.3.5 用の initramfs は、**§1 の木 `work/extract_initramfs` をそのまま土台にし、写しに overlay とパッチを重ねて作る**。
+  元の木そのものは 2.3.5 用に書き換えない。
+- ⚠ **元の木に入れた変更は両系に効く。** 2026-09-29 に入れた P4-5b（`pcr_decoy_seed` を `SHA256("dtebx-pcr-decoy-v2:<n>")` の
+  固定値に変更。生鍵を使わない）がそれで、prov で §3.8 ② のとおり再パックして再プロビジョニングすれば、2 号機も同じ値になる。
+  それまでの 2 号機は、新しい 575-1（hc.pcr）が届いた時点で hc.pcr が WARN になる（移行期間の挙動として責任者了承済み）。
+- pi-gen の `firstboot-partition-setup.sh`（P4-5a）も両系で共通の像に入る。`/dev/mapper/cryptlvm` が開いていれば（2.3.5 の
+  initramfs）LVM から後だけ行い、開いていなければ（2.0.4 の initramfs）従来どおり全部行う。
+  ⚠ **2.3.5 の initramfs を、P4-5a より前の firstboot の像と組んではいけない**（`parted rm 3` が使用中で失敗し、起動のたびに止まる）。
+
+### 4.1 `/usr/bin` へのパッチと `kernel_modules.list`（prov2 で実行）
+
+2.3.5 は §3.2・§3.3・§3.7 のパッチの目印が合わない（当てると `exit 1` で何も書かずに止まる）。代わりに次を使う。
+
+| 物 | 何を変えるか | 置き先 |
+|---|---|---|
+| `patches-2.3.5/p4-1_fastboot_transport_usb.py`（目印 `DTEBX_FASTBOOT_TRANSPORT_V235`） | §3.3 の後継。`setup_fastboot_and_id_vars` で、制御（`FASTBOOT_DEVICE_SPECIFIER`）に加え **`flash`（`FASTBOOT_TCP_FLASH_SPECIFIER`）も USB シリアルに固定**する。2.3.5 は分割モードで `flash` だけを `tcp:` へ送るため | `/usr/bin/rpi-sb-common.sh` |
+| `patches-2.3.5/p4-3_verity_reproducible.py`（目印 `DTEBX_P43_V235`） | §3.8 の root.hash・verity.layout の同梱、§3.10 の boot.img を毎回同じにする処理、§3.8 の固定の下層を書く処理を 2.3.5 の当て先に当て直す（当社の塊は `host-support/rpi-sb-provisioner.sh` から機械的に切り出したもの） | `/usr/bin/rpi-sb-provisioner.sh` |
+| `patches-2.3.5/kernel_modules.list` | §3.2・§3.7 の後継。上流の一覧に `btrfs`・`blake2b_generic`（btrfs の softdep。`rpi-modcopy` は softdep を追わない）・`dm-verity`・`overlay` を足したもの。スクリプトのパッチは不要 | `/etc/rpi-sb-provisioner/kernel_modules.list` |
+
+```bash
+# 開発機から（sudo は prov2 で要る。どのパッチも冪等＝当て済みなら "already patched"）
+scp patches-2.3.5/p4-1_fastboot_transport_usb.py patches-2.3.5/p4-3_verity_reproducible.py patches-2.3.5/kernel_modules.list prov2:dfx-patches/
+ssh prov2 'set -e; D=$(date +%Y%m%d%H%M%S)
+sudo cp -a /usr/bin/rpi-sb-common.sh /usr/bin/rpi-sb-common.sh.bak.p41.$D
+sudo cp -a /usr/bin/rpi-sb-provisioner.sh /usr/bin/rpi-sb-provisioner.sh.bak.p43.$D
+sudo python3 ~/dfx-patches/p4-1_fastboot_transport_usb.py /usr/bin/rpi-sb-common.sh
+sudo python3 ~/dfx-patches/p4-3_verity_reproducible.py /usr/bin/rpi-sb-provisioner.sh
+sh -n /usr/bin/rpi-sb-common.sh && bash -n /usr/bin/rpi-sb-common.sh && sh -n /usr/bin/rpi-sb-provisioner.sh && bash -n /usr/bin/rpi-sb-provisioner.sh
+sudo install -m 644 -o root -g root ~/dfx-patches/kernel_modules.list /etc/rpi-sb-provisioner/kernel_modules.list'
+```
+
+`/etc/rpi-sb-provisioner/config` の `RPI_SB_PROVISIONER_FASTBOOT_TRANSPORT=usb` は P4-1 が読む当社の変数。**行末にコメントを書かない**
+（2.3.5 の UI は `=` の後ろを全部値として読む＝`provisioner-service/src/utils.cpp:1296-1305`）。
+⚠ **UI の Options で保存すると、config は UI が書き直す**（2026-09-29 に確認）: 変数は名前の順に並べ替えられ、空の値は `''` になり、既定値のファイルにある変数が足され、**コメントの行は消える**。当社の変数 `RPI_SB_PROVISIONER_FASTBOOT_TRANSPORT` は残る。`RPI_DEVICE_FIRMWARE_FILE` は UI の選択肢と同じ `/usr/lib/firmware/raspberrypi/bootloader-2712/default/pieeprom-2026-09-25.bin` の書き方にする（`/lib/…` と書くと同じファイルでも UI では未選択に見える。trixie の `/lib` は `usr/lib` への symlink）。UI で保存した後は、この変数と `RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE=0` が残っていることを確かめる。
+
+### 4.2 initramfs へのパッチ（`patches-2.3.5/p4-*_initramfs*.py`）
+
+`build-initramfs-2.3.5.sh` が**名前の順**に当てる。順序に依存がある（後のパッチは前のパッチの目印・関数が無いと、何も書かずに止まる）。
+
+| パッチ（目印） | 何を変えるか | 依存 |
+|---|---|---|
+| `p4-4_initramfs_hmac.py`（`DTEBX_P44_HMAC_V235`） | p2 の解錠を `hex(firmware HMAC(key-id 1, block-device-id))` に、p3 の鍵を `firmware HMAC(key-id 1, "dtebx-p3-luks-v1")`（32B）に変える。使う前に CID（16 進 32 桁）と合言葉（16 進 64 桁）を確かめ、失敗の原因を `FATAL(p2-pass): CID unavailable`／`firmware HMAC unavailable` に分けて出す。p3 の鍵は終了コード＋32 バイトで確かめる（`dtebx_p3_key_ok`）。生鍵への戻りは無い | なし（最初に当てる） |
+| `p4-5a_initramfs_p3.py`（`DTEBX_P45A_P3_V235`） | p3 を 1MiB 境界（`TARGET_P2_SIZE + 2048`）で作り、初回起動（目印 `/etc/cryptsetup-keys/.p3_initialized` が無い）だけ p3 を HMAC の鍵で**無条件に** `luksFormat` して `cryptlvm` として開いたまま switch_root する（firstboot は LVM から後だけ行う）。⚠ 2026-09-29 の修正: 当初は「p3 がまだ LUKS でないときだけ」作っていたため、`fastboot erase`（discard は中身を 0 にしない）で残った前の p3 のヘッダを見て作り直しを飛ばし、前の p3 を開いてしまった | P4-4（`dtebx_p3_key_ok`） |
+| `p4-5c_initramfs_resize.py`（`DTEBX_P45C_RESIZE_V235`） | 初回の `cryptsetup resize cryptroot` を HMAC の合言葉で行い、合言葉の確認と resize の結果を見て、失敗なら `FATAL(resize)` で再起動する | P4-4（`dtebx_p2_pass_check`） |
+| `p4-7_initramfs_hmac_lock.py`（`DTEBX_P47_HMAC_LOCK_V235`） | `systemctl switch-root` の直前に `rpi-fw-crypto set-key-status 1 READ_LOCKED HMAC_LOCKED`。成否は終了コードでなく `get-key-status` の読み直し（bit8＋bit11＝`0x900`）で決める。5 回・1 秒おきにやり直し、閉じられなければ switch_root せず `FATAL(hmac-lock)` → 再起動（案 B）。失敗は `/mnt/var/log/dtebx-hmac-lock-failed.log` にも残す | P4-4（`rpi-fw-crypto` が initramfs に在ること） |
+
+⚠ この initramfs は `set -x` で動き、出力はシリアルに出る。**合言葉・鍵は変数に入れずパイプだけで渡す**（パッチはすべてこの作法）。
+
+### 4.3 initramfs の組み立て（`build-initramfs-2.3.5.sh`）
+
+```bash
+# 開発機から材料を送る（元の木 83MB を含む）
+tar -cf - work/extract_initramfs work-2.3.5 patches-2.3.5 build-initramfs-2.3.5.sh | ssh prov2 'rm -rf ~/dfx-build && mkdir -p ~/dfx-build && tar -C ~/dfx-build -xf -'
+# prov2 で組み立てる（引数: <材料のディレクトリ> <出力ファイル>。出力ファイルと作業用の一時ディレクトリ以外は書かない）
+ssh prov2 'cd ~/dfx-build && sudo sh build-initramfs-2.3.5.sh ~/dfx-build ~/dfx-build/cryptroot_initramfs.v235'
+```
+
+- 期待する出力: `patched: …/usr/bin/init_cryptroot.sh` が **4 行**、`built: …`、大きさ（2026-09-29 は 24.2MB）、sha256。
+- 所要時間: zstd `-19` の圧縮が大半で、1〜2 分の見込み。
+- 組み立て後の確認（2026-09-29 に行ったもの）: 展開して `init_cryptroot.sh` が開発機で同じ 4 本を当てた写しと一致／目印 4 種と
+  `dtebx-pcr-decoy-v2:` がある／`cryptkey-fetch`・`rpi-otp-private-key` の呼び出しが 0 件／initramfs の busybox で `sh -n` が通る／
+  overlay の 10 ファイルが `work-2.3.5/MANIFEST` の sha256 と一致（`cd <展開先> && sha256sum -c`）。
+
+**持ち込む 10 ファイル（`work-2.3.5/overlay`。由来と sha256 は `work-2.3.5/MANIFEST`）**
+
+| 物 | 出どころ | 理由 |
+|---|---|---|
+| `usr/bin/rpi-fw-crypto`・`usr/lib/aarch64-linux-gnu/librpifwcrypto.so.0` | **trixie** 版 `rpifwcrypto_20260626-1`・`librpifwcrypto0_20260626-1`（archive.raspberrypi.com） | bookworm には 20251002 版までしか無く、`HMAC_LOCKED` を指定できない。要求は `GLIBC_2.34` まで・gnutls は `GNUTLS_3_4` だけ（`objdump -T`）で、元の木の libc 2.36 で動く |
+| `usr/bin/block-device-id` | **trixie** 版 `block-device-id_0.1.1` | bookworm には無い。要求は `GLIBC_2.34` まで |
+| `libgnutls.so.30` と依存 `libidn2.so.0`・`libunistring.so.2`・`libtasn1.so.6`・`libnettle.so.8`・`libhogweed.so.6`・`libgmp.so.10`（実体 7 個＋soname の symlink） | **GOLD_MASTER の像**（bookworm。`libgnutls30 3.7.9-2+deb12u7` ほか） | trixie の gnutls を持ち込むと glibc 2.36 より新しい物を要求する依存が混ざりうるので、bookworm の物を使う。`libp11-kit`・`libffi`・`libgcc_s`・libc は元の木に既にある |
+
+- ライブラリは `ld.so.cache` 無しで既定の検索先（`/usr/lib/aarch64-linux-gnu`）から見つかる（prov2 の chroot で `ld-linux-aarch64.so.1 --list` により確認）。
+- 大きさ: 2.0.4 用より +3.1MB。boot.img の上限は 180MB（Raspberry Pi 公式 `config_txt/boot.adoc:144`）。
+
+### 4.4 配置
+
+```bash
+ssh prov2 'sudo install -m 644 -o root -g root ~/dfx-build/cryptroot_initramfs.v235 /etc/rpi-sb-provisioner/cryptroot_initramfs && sha256sum ~/dfx-build/cryptroot_initramfs.v235 /etc/rpi-sb-provisioner/cryptroot_initramfs'
+```
+
+- **置き場は `/etc/rpi-sb-provisioner/cryptroot_initramfs`。** 2.3.5 は `/etc` にあればそちらを使う（`get_cryptroot`＝`rpi-sb-provisioner.sh:175-181`）。
+- パッケージの持ち物 `/var/lib/rpi-sb-provisioner/cryptroot_initramfs` は上流の原本のまま触らない（退避も不要）。
+- **戻すときは `/etc/rpi-sb-provisioner/cryptroot_initramfs` を消すだけ**でよい（上流の initramfs に戻る）。
+
+### 4.5 反映確認（`dpkg -V` の期待値）
+
+| 見るもの | 期待 |
+|---|---|
+| `sudo dpkg -V rpi-sb-provisioner` | **`/usr/bin/rpi-sb-common.sh`（P4-1）と `/usr/bin/rpi-sb-provisioner.sh`（P4-3）の 2 ファイルだけ**が改変ありとして出る。`/etc` に置いた initramfs・`kernel_modules.list`・config はパッケージの持ち物ではないので出ない |
+| `apt-mark showhold` | `rpi-sb-provisioner` |
+| `grep -c DTEBX_FASTBOOT_TRANSPORT_V235 /usr/bin/rpi-sb-common.sh`・`grep -c DTEBX_P43_V235 /usr/bin/rpi-sb-provisioner.sh` | どちらも 1 以上 |
+| 書き込み時の `provisioner.log` | `Fastboot transport forced to USB for device <serial> (control and flash)` が出て、`tcp:` が出ない |
+| 書き込み後の機体 | `sudo vcmailbox 0x00030090 4 4 1` の値が `0x900` を含む（bit8 READ_LOCKED＋bit11 HMAC_LOCKED。firmware が立てる他の bit で値は変わりうる。1 号機の ADM の OS に `rpi-fw-crypto` は無い） |
+
+### 4.6 hold と、上流を上げるとき
+
+- 2.3.5 は **`apt-mark hold` 済み**。apt の候補は 2.3.4（上流 SECURITY.md で非支援）なので、**`apt install rpi-sb-provisioner` を打たない**。
+- 上流を上げるときの手順:
+  1. 新しいタグの SECURITY.md で支援対象であることを確かめる。
+  2. 上流のソースから deb を組む（計画 P2 と同じ: `git archive` → `mk-build-deps` → `dpkg-buildpackage -b -uc -us`。ビルド中は GitHub へ出られること）。
+  3. `sudo apt-mark unhold rpi-sb-provisioner` → 新しい deb を `apt-get install` → **すぐに** `sudo apt-mark hold rpi-sb-provisioner`。
+  4. §4.1 のパッチを当て直す。目印が合わなければ `exit 1` で何も書かずに止まるので、そのときは新しい版に合わせてパッチを書き直す。
+  5. `/etc/rpi-sb-provisioner/kernel_modules.list` を、新しい上流の `/var/lib/rpi-sb-provisioner/kernel_modules.list` と見比べ、上流で増えた行を取り込む（`/etc` の方が優先されるので、放っておくと上流の変更が効かない）。
+  6. `/etc` の initramfs は上流を上げても置き換わらない。上流の initramfs の変更（systemd initrd の流れ等）は取り込まれないので、必要なら §4.2・§4.3 をやり直す。
+  7. §4.5 を確かめる。
+- ⚠ install した時点で udev の規則が有効になり、機体を USB につなぐと書き込みが自動で始まる。2026-09-29 時点では書き込み系の unit 6 つ（`rpi-sb-{bootstrap,triage,provisioner}@`・`rpi-{fde,naked,idp}-provisioner@`）を `systemctl mask` している（計画 R-2）。**上げ直した後も、試験の準備が整うまで同じく mask する。**

@@ -840,10 +840,13 @@ exec > /dev/console 2>&1
 # ここから 570-1 の初回の蹴りまでの窓は adm-boot-dispatcher が背景で蹴って埋める。
 wdt_kick_stop || true
 
-# ★C-380 / 個体固有 PCR decoy（回答書 第2部 0 末尾「PCR に個体固有の値を 1 回積む」／
-#   MEMO-DECEPTION 5-0）。measured-boot 用 PCR 0〜7 を OTP 由来の個体固有値で非ゼロにし、
+# ★C-380 / PCR decoy（回答書 第2部 0 末尾／MEMO-DECEPTION 5-0）。measured-boot 用 PCR 0〜7 を非ゼロにし、
 #   奪取者が「PCR は使われていない」と即断できないようにする（時間稼ぎ）。
-#   ★アーキ寄与は無い（OTP から再現可能）。★封印には束縛しない（更新のたびに開け直す事態を避ける）。
+#   ★P4-5b（2026-09-29 責任者裁定・案 B）: 積む値は**全機体共通の固定値** d_n = SHA256("dtebx-pcr-decoy-v2:<n>")。
+#     旧方式（HMAC(OTP, "dtebx-pcr-decoy-v<n>")＝個体固有）は、rpi-sb-provisioner 2.3.5 の lock_device_private_key=1
+#     と解錠後の HMAC の lock の下では、運転中の照合側（575-1 hc.pcr）が計算できないため廃止した。
+#     2.0.4 系（prov）と 2.3.5 系（prov2）の両方でこの元の木を使うので、次のプロビジョニングからどちらも同じ値になる。
+#   ★アーキ寄与は無い（誰でも再現可能）。★封印には束縛しない（更新のたびに開け直す事態を避ける）。
 #   生の TPM2_PCR_Extend を /dev/tpmrm0 へ投げる（tpm2 ツールを積まないため）。
 #   ⚠ 失敗しても PCR はゼロのまま＝起動は妨げない（hc.pcr は従来どおり N/A へ落ちる）。
 #   ⚠ 実機で pcrread して 0〜7 が期待値になっているか要検証（生バイト構築のため）。
@@ -858,7 +861,7 @@ pcr_decoy_seed() {
   #   ∴ marker を initramfs ルート / に置く（ramfs＝常に書け、同一起動内で永続）。
   #   ★2026-09-18: 当初 /run に置いたが実機で marker が効かず triple のままだった
   #     （/run が書けず : > が失敗＝毎回 seed）。/ は確実に書けるので / へ変更。
-  #   最初に TPM+OTP が揃った 1 回だけ積む。以降の再走は skip＝常に単発 extend。
+  #   最初に TPM が揃った 1 回だけ積む。以降の再走は skip＝常に単発 extend。
   _mark=/pcr-decoy.seeded
   [ -e "$_mark" ] && { echo "[pcr-decoy] already seeded this boot; skip"; return 0; }
   # TPM ノードは実行時に kernel が作る。probe(#6217 で ~3.6s)を最大 5s 待つ。tpmrm0 優先
@@ -871,21 +874,17 @@ pcr_decoy_seed() {
     /usr/bin/busybox sleep 1; _i=$((_i+1))
   done
   [ -n "$_dev" ] && [ -e "$_dev" ] || { echo "[pcr-decoy] no TPM device (waited ${_i}s); skip"; return 0; }
-  _o="$(/usr/bin/cryptkey-fetch | /usr/bin/base64 -d 2>/dev/null | /usr/bin/xxd -p | tr -d ' \n')"
-  [ ${#_o} -eq 64 ] || { echo "[pcr-decoy] OTP unavailable; skip"; return 0; }
-  # TPM+OTP が揃った＝commit。ここで marker を立て、以降の再走は先頭 check で skip させる
-  #（device/OTP がまだ揃わない早期走行では marker を立てないので、後続走行で積める）。
+  # TPM が揃った＝commit。ここで marker を立て、以降の再走は先頭 check で skip させる
+  #（device がまだ揃わない早期走行では marker を立てないので、後続走行で積める）。
   : > "$_mark" 2>/dev/null || true
   for _n in 0 1 2 3 4 5 6 7; do
-    # 積む digest = HMAC-SHA256(key=OTP, msg="dtebx-pcr-decoy-v<n>") の 32 バイト。
-    # ★このラベル "dtebx-pcr-decoy-v" は 575-1 hc.pcr の decoy_label と必ず一致させること
+    # 積む digest = SHA256("dtebx-pcr-decoy-v2:<n>") の 32 バイト（鍵を使わない固定値。P4-5b・v2）。
+    # ★このラベル "dtebx-pcr-decoy-v2:" は 575-1 hc.pcr の decoy_label 既定値と必ず一致させること
     #   （adm-hc-p/util/Tpm.go。ずれると hc が全 PCR を「値違い」=WARN と誤判定する）。
     #   ★結果 PCR 値はこの digest そのものではなく SHA256(0x00×32 ‖ digest)
     #     （PCR は 0 から Extend され PCR_new = SHA256(PCR_old ‖ digest) となるため）。
     #     575-1(hc.pcr) 側の期待値照合は、この「結果 PCR 値」で行うこと。
-    _d="$(printf 'dtebx-pcr-decoy-v%s' "$_n" \
-          | /usr/bin/openssl dgst -sha256 -mac HMAC -macopt "hexkey:${_o}" -binary \
-          | /usr/bin/xxd -p | tr -d ' \n')"
+    _d="$(printf 'dtebx-pcr-decoy-v2:%s' "$_n" | /usr/bin/sha256sum | cut -c1-64)"
     [ ${#_d} -eq 64 ] || continue
     _ph="$(printf '%08x' "$_n")"
     # TPM2_PCR_Extend: tag(8002) size(00000041=65) cc(00000182) pcrHandle authSize(00000009)
@@ -898,7 +897,6 @@ pcr_decoy_seed() {
             | tr -d '\n' | cut -c13-20 )"
     [ "$_rc" = "00000000" ] && echo "[pcr-decoy] PCR $_n seeded ($_dev)" || echo "[pcr-decoy] PCR $_n rc=${_rc:-none}"
   done
-  _o=""
 }
 pcr_decoy_seed || true
 
